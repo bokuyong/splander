@@ -224,6 +224,20 @@ export const HandIcon = (p: IconProps) => (
   </Icon>
 )
 
+export const SpeakerIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z" fill="currentColor" fillOpacity="0.15" />
+    <path d="M15.5 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11" />
+  </Icon>
+)
+
+export const SpeakerOffIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z" fill="currentColor" fillOpacity="0.15" />
+    <path d="M15.5 9.5l5 5M20.5 9.5l-5 5" />
+  </Icon>
+)
+
 export const CardsIcon = (p: IconProps) => (
   <Icon {...p}>
     <rect x="3" y="5" width="11" height="15" rx="2" fill="currentColor" fillOpacity="0.15" />

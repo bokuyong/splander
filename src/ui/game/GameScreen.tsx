@@ -9,8 +9,21 @@ import { Sheet } from '../components/Sheet'
 import type { ControllerSnapshot, GameController } from '../controller'
 import { HowToPlayContent } from '../home/HowToPlay'
 import { addToSelection, removeFromSelection, selectionHint, selectionToAction } from '../logic/selection'
+import { play, toggleMuted } from '../logic/sound'
 import { Chip } from '../components/Chip'
-import { BellIcon, BookIcon, CloseIcon, CrownIcon, GemIcon, HomeIcon, MenuIcon, ScrollIcon } from '../components/Icons'
+import {
+  BellIcon,
+  BookIcon,
+  CloseIcon,
+  CrownIcon,
+  GemIcon,
+  HomeIcon,
+  MenuIcon,
+  ScrollIcon,
+  SpeakerIcon,
+  SpeakerOffIcon,
+} from '../components/Icons'
+import { SOUND_LABEL, useSoundMuted } from '../logic/useSound'
 import { CardSheet, DeckSheet } from './CardSheet'
 import type { CardPlace } from './CardSheet'
 import { DiscardModal, GuestChoiceModal, GuestSheet, LogSheet, PlayerSheet } from './Modals'
@@ -19,6 +32,7 @@ import { MyArea, OpponentPanel } from './PlayerPanels'
 import { Bank, Board, GuestsRow } from './Table'
 import { useGameFeed } from './useGameFeed'
 import type { GameFeed } from './useGameFeed'
+import { resultSound, useGameSounds } from './useGameSounds'
 import '../styles/game.css'
 
 interface GameScreenProps {
@@ -63,6 +77,8 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
   const current = state.currentPlayer
   const over = state.phase === 'gameOver'
   const hotseat = mySeats.length > 1
+  useGameSounds(snap, hotseat)
+  const muted = useSoundMuted()
 
   // --- whose eyes are on the screen ------------------------------------------
   const [ackSeat, setAckSeat] = useState<number | null>(hotseat ? null : (mySeats[0] ?? 0))
@@ -100,11 +116,19 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
     const timer = setTimeout(() => setResultDue(true), RESULT_DELAY_MS)
     return () => clearTimeout(timer)
   }, [over])
+  // the fanfare (or sigh) comes with the result screen, once
+  const resultHeard = useRef(false)
+  useEffect(() => {
+    if (!over || !resultDue || resultHeard.current) return
+    resultHeard.current = true
+    play(resultSound(state, mySeats))
+  }, [over, resultDue, state, mySeats])
   const toastId = useRef(0)
 
   const say = useCallback((text: string) => {
     toastId.current += 1
     setToast({ id: toastId.current, text })
+    play('error')
   }, [])
   useEffect(() => {
     if (!toast) return
@@ -144,6 +168,7 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
     (action: Action) => {
       setOpen(null)
       setSelection([])
+      play('confirm')
       controller.sendAction(action)
     },
     [controller, setSelection],
@@ -152,8 +177,14 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
   const tapBank = (color: TokenColor) => {
     if (blocked) return say(blocked)
     const result = addToSelection(state.bank, selectionRef.current, color)
-    if (result.ok) setSelection(result.selection)
-    else say(result.reason)
+    if (result.ok) {
+      setSelection(result.selection)
+      play('tokenPick')
+    } else say(result.reason)
+  }
+  const dropFromTray = (index: number | 'all') => {
+    setSelection(index === 'all' ? [] : removeFromSelection(selectionRef.current, index))
+    play('tokenDrop')
   }
   const trayAction = selectionToAction(state.bank, selection)
   const trayOk = trayAction !== null && canAct && engine.isLegal(state, trayAction)
@@ -246,7 +277,7 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
       <div className="actionbar">
         {selection.length > 0 ? (
           <div className="tray">
-            <button type="button" className="icon-btn tray-cancel" onClick={() => setSelection([])} aria-label={THEME.labels.cancel}>
+            <button type="button" className="icon-btn tray-cancel" onClick={() => dropFromTray('all')} aria-label={THEME.labels.cancel}>
               <CloseIcon />
             </button>
             <div className="tray-chips">
@@ -255,7 +286,7 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
                   type="button"
                   key={`${color}-${i}`}
                   className="tray-chip"
-                  onClick={() => setSelection(removeFromSelection(selectionRef.current, i))}
+                  onClick={() => dropFromTray(i)}
                   aria-label={`${THEME.tokens[color].name} 빼기`}
                 >
                   <Chip color={color} size={32} />
@@ -356,6 +387,10 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
             <button type="button" className="btn btn-block" onClick={() => setOpen({ kind: 'log' })}>
               <ScrollIcon /> 지난 차례 보기
             </button>
+            <button type="button" className="btn btn-block" onClick={toggleMuted} aria-pressed={!muted}>
+              {muted ? <SpeakerOffIcon /> : <SpeakerIcon />} {muted ? SOUND_LABEL.off : SOUND_LABEL.on}
+              <small>{muted ? '지금은 조용해요' : '내 차례가 되면 알려줘요'}</small>
+            </button>
             <button type="button" className="btn btn-block" onClick={onExit}>
               <HomeIcon /> 처음 화면으로
             </button>
@@ -380,6 +415,8 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
           onReady={() => {
             setOpen(null)
             setAckSeat(current)
+            // pass-and-play: the chime belongs to the moment the table is uncovered
+            play('yourTurn')
           }}
         />
       )}

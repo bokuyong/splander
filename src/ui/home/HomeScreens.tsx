@@ -7,6 +7,7 @@ import { ArtImage } from '../components/Art'
 import { useArt } from '../logic/art'
 import { GemToken } from '../components/GemToken'
 import { BackIcon, BookIcon, GemIcon, LinkIcon, PeopleIcon, PlayIcon, RobotIcon } from '../components/Icons'
+import { SoundToggle } from '../components/SoundToggle'
 import type { SavedGame } from '../controller'
 import { HowToPlayContent } from './HowToPlay'
 import { KeyArt } from './KeyArt'
@@ -98,6 +99,7 @@ export function HomeScreen({ saved, onResume, onSolo, onLocal, onOnline, onHowTo
       <div className="home-art" aria-hidden="true">
         <KeyArt className="home-keyart" />
       </div>
+      <SoundToggle className="home-sound" />
       <div className="home-title">
         <p className="home-en">{THEME.titleEn}</p>
         <h1>{THEME.title}</h1>
