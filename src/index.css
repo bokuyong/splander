@@ -1,0 +1,1138 @@
+/* 스플랜더: base styles, shared pieces (gem tokens, cards, nobles, buttons, sheets).
+   Palette variables (--bg, --tok-red, ...) are set from THEME in src/ui/theme.ts.
+   Look: a Renaissance gem merchant's table. Deep velvet, dark lacquer panels,
+   gold hairlines, parchment cards, gems drawn as real cut stones. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  --radius: 14px;
+  --radius-sm: 9px;
+  --gold: #d9b45c;
+  --gold-deep: #9d7026;
+  --gold-ink: #5a3e0e;
+  --line: rgba(217, 180, 92, 0.3);
+  --line-strong: rgba(217, 180, 92, 0.65);
+  --glow: 0 0 0 1.5px var(--accent), 0 0 16px rgba(217, 180, 92, 0.55);
+  /* dark lacquer surface with a gold hairline and a soft inner shadow */
+  --lacquer: linear-gradient(180deg, #272c48 0%, #1c2036 55%, #161a2b 100%);
+  --lacquer-shadow:
+    inset 0 0 0 1px rgba(217, 180, 92, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -10px 18px rgba(0, 0, 0, 0.28),
+    0 4px 10px rgba(0, 0, 0, 0.45);
+  --velvet: var(--lacquer);
+  --ink-on-gold: #3b2a00;
+  --gold-bevel: linear-gradient(180deg, #fbeec1 0%, #ecc968 38%, #d2a23e 68%, #b8872c 100%);
+  --font: 'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', system-ui,
+    -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Latin and digits in Cinzel, Korean in Hahmlet (both bundled, see fonts.css) */
+  --font-display: 'Cinzel', 'Hahmlet', 'Noto Serif KR', 'Apple SD Gothic Neo', 'Batang', serif;
+  --font-title: 'Hahmlet', 'Cinzel', 'Noto Serif KR', 'Apple SD Gothic Neo', 'Batang', serif;
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text);
+  background: var(--bg);
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  /* no pull-to-refresh, no rubber band, no double-tap zoom */
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+#root {
+  height: 100%;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input {
+  font: inherit;
+  /* 16px keeps iOS from zooming into focused inputs */
+  font-size: 16px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+.art-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* --- app shell: velvet cloth ----------------------------------------------- */
+
+.app {
+  position: relative;
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 70% at 50% -10%, rgba(96, 66, 140, 0.38), transparent 60%),
+    radial-gradient(90% 50% at 100% 100%, rgba(140, 44, 70, 0.28), transparent 65%),
+    radial-gradient(80% 50% at 0% 90%, rgba(40, 70, 150, 0.22), transparent 65%),
+    linear-gradient(180deg, #0d0b18 0%, var(--bg) 45%, #0f0d1d 100%);
+}
+/* cloth grain */
+.app::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.55;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.09 0'/></filter><rect width='220' height='220' filter='url(%23n)'/></svg>");
+}
+/* vignette */
+.app::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(130% 90% at 50% 45%, transparent 45%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/* fine gold dust on the cloth */
+.stars {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    radial-gradient(1.2px 1.2px at 12% 8%, #f3dc9a 50%, transparent 51%),
+    radial-gradient(1px 1px at 28% 22%, #fff 50%, transparent 51%),
+    radial-gradient(1.4px 1.4px at 44% 6%, #f3dc9a 50%, transparent 51%),
+    radial-gradient(1px 1px at 61% 16%, #fff 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 8% 34%, #f3dc9a 50%, transparent 51%),
+    radial-gradient(1px 1px at 92% 38%, #fff 50%, transparent 51%),
+    radial-gradient(1.3px 1.3px at 73% 30%, #f3dc9a 50%, transparent 51%),
+    radial-gradient(1px 1px at 36% 44%, #fff 50%, transparent 51%),
+    radial-gradient(1.1px 1.1px at 18% 62%, #f3dc9a 50%, transparent 51%),
+    radial-gradient(1px 1px at 84% 66%, #fff 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 55% 78%, #f3dc9a 50%, transparent 51%),
+    radial-gradient(1px 1px at 6% 88%, #fff 50%, transparent 51%);
+  opacity: 0.35;
+  animation: twinkle 6s ease-in-out infinite alternate;
+}
+
+@keyframes twinkle {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 0.5;
+  }
+}
+
+/* --- gem colors ------------------------------------------------------------ */
+
+.c-white {
+  --c: var(--tok-white);
+  --c-soft: var(--tok-white-soft);
+  --c-ink: var(--tok-white-ink);
+}
+.c-blue {
+  --c: var(--tok-blue);
+  --c-soft: var(--tok-blue-soft);
+  --c-ink: var(--tok-blue-ink);
+}
+.c-green {
+  --c: var(--tok-green);
+  --c-soft: var(--tok-green-soft);
+  --c-ink: var(--tok-green-ink);
+}
+.c-red {
+  --c: var(--tok-red);
+  --c-soft: var(--tok-red-soft);
+  --c-ink: var(--tok-red-ink);
+}
+.c-black {
+  --c: var(--tok-black);
+  --c-soft: var(--tok-black-soft);
+  --c-ink: var(--tok-black-ink);
+}
+.c-gold {
+  --c: var(--tok-gold);
+  --c-soft: var(--tok-gold-soft);
+  --c-ink: var(--tok-gold-ink);
+}
+
+/* --- icons ----------------------------------------------------------------- */
+
+.icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  flex: none;
+  vertical-align: -0.18em;
+}
+.icon.is-gold {
+  color: var(--gold-light);
+}
+
+/* --- gem tokens (GemToken) ------------------------------------------------- */
+
+.tok {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: var(--tok, 1em);
+  height: var(--tok, 1em);
+  flex: none;
+}
+.tok > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.tok-token {
+  border-radius: 50%;
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.55),
+    0 0 0 0.5px rgba(0, 0, 0, 0.5);
+  transition:
+    opacity 0.25s,
+    filter 0.25s,
+    transform 0.2s;
+}
+.tok-pip {
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+.tok-label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: calc(var(--tok, 16px) * 0.6);
+  line-height: 1;
+  color: #fff;
+  text-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.9),
+    0 0 4px rgba(0, 0, 0, 0.7);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.tok-pip.c-white .tok-label {
+  color: #1d2233;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+.tok-pip.c-gold .tok-label {
+  color: #3b2a00;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+.tok.is-dim {
+  opacity: 0.35;
+  filter: saturate(0.4);
+}
+/* stone facets */
+.gem-facet {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.55);
+  stroke-width: 0.8;
+  stroke-linecap: round;
+}
+.gem-table {
+  fill: rgba(255, 255, 255, 0.3);
+}
+.gem-step {
+  fill: rgba(255, 255, 255, 0.12);
+}
+.gem-edge {
+  fill: none;
+  stroke: rgba(0, 0, 0, 0.45);
+  stroke-width: 0.9;
+}
+.c-white .gem-facet {
+  stroke: rgba(80, 95, 135, 0.5);
+}
+.c-white .gem-table {
+  fill: rgba(255, 255, 255, 0.8);
+}
+.c-white .gem-edge {
+  stroke: rgba(70, 84, 120, 0.65);
+}
+.c-black .gem-facet {
+  stroke: rgba(255, 255, 255, 0.38);
+}
+.c-black .gem-table {
+  fill: rgba(255, 255, 255, 0.16);
+}
+.c-black .gem-edge {
+  stroke: rgba(255, 255, 255, 0.5);
+}
+.coin-relief {
+  fill: #8a5e10;
+}
+.coin-relief-hi {
+  fill: #fff2c2;
+  opacity: 0.85;
+}
+/* idle shimmer: the specular highlight breathes, staggered per gem */
+.gem-spec {
+  animation: glint 6s ease-in-out infinite;
+}
+.c-blue .gem-spec {
+  animation-delay: -1s;
+}
+.c-green .gem-spec {
+  animation-delay: -2s;
+}
+.c-red .gem-spec {
+  animation-delay: -3s;
+}
+.c-black .gem-spec {
+  animation-delay: -4s;
+}
+.c-gold .gem-spec {
+  animation-delay: -5s;
+}
+@keyframes glint {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* the bare stone as an inline mark */
+.glyph {
+  width: 1em;
+  height: 1em;
+}
+
+/* --- chips: a token plus a count --------------------------------------------- */
+
+.chip {
+  --chip: 44px;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--chip);
+  height: var(--chip);
+  border-radius: 50%;
+  transition:
+    opacity 0.25s,
+    filter 0.25s,
+    transform 0.2s;
+}
+.chip .tok {
+  width: 100%;
+  height: 100%;
+}
+.chip.is-dim {
+  opacity: 0.38;
+  filter: saturate(0.4);
+}
+.chip-count {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff3c4;
+  background: linear-gradient(180deg, #23263a, #0f111b);
+  box-shadow:
+    inset 0 0 0 1px rgba(217, 180, 92, 0.75),
+    0 1px 3px rgba(0, 0, 0, 0.6);
+  animation: pop 0.35s ease-out;
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(1.5);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* --- cards ----------------------------------------------------------------- */
+
+.card-btn {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 10%/6%;
+  container-type: inline-size;
+  transition: transform 0.15s;
+}
+button.card-btn:active {
+  transform: scale(0.96);
+}
+.card {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: clamp(5px, 8cqi, 12px);
+  overflow: hidden;
+  box-shadow:
+    0 3px 8px rgba(0, 0, 0, 0.6),
+    0 1px 2px rgba(0, 0, 0, 0.6);
+}
+/* double hairline gold frame */
+.card::before,
+.card::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  z-index: 5;
+  border-radius: clamp(3px, 5cqi, 8px);
+}
+.card::before {
+  inset: clamp(2px, 3cqi, 5px);
+  border: 1px solid rgba(190, 145, 48, 0.85);
+}
+.card::after {
+  inset: clamp(4px, 5.5cqi, 9px);
+  border: 1px solid rgba(190, 145, 48, 0.4);
+  display: none;
+}
+.corners {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  color: #c39a3a;
+  display: none;
+}
+/* the second hairline and the filigree only read on larger cards */
+@container (min-width: 96px) {
+  .card::after,
+  .corners {
+    display: block;
+  }
+}
+.corner {
+  position: absolute;
+  width: clamp(8px, 15cqi, 24px);
+  height: clamp(8px, 15cqi, 24px);
+  filter: drop-shadow(0 0.5px 0 rgba(0, 0, 0, 0.5));
+}
+.corner-tl {
+  left: clamp(2px, 3cqi, 5px);
+  top: clamp(2px, 3cqi, 5px);
+}
+.corner-tr {
+  right: clamp(2px, 3cqi, 5px);
+  top: clamp(2px, 3cqi, 5px);
+  transform: rotate(90deg);
+}
+.corner-br {
+  right: clamp(2px, 3cqi, 5px);
+  bottom: clamp(2px, 3cqi, 5px);
+  transform: rotate(180deg);
+}
+.corner-bl {
+  left: clamp(2px, 3cqi, 5px);
+  bottom: clamp(2px, 3cqi, 5px);
+  transform: rotate(270deg);
+}
+
+/* face: parchment below, illustrated scene above */
+.card-face {
+  --scene: 57%;
+  background: linear-gradient(180deg, #f3e8cf 0%, #ead9b7 60%, #e0cea6 100%);
+  color: #2a2338;
+}
+.card-paper {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.55;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  z-index: 1;
+}
+.card-scene {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: var(--scene);
+  overflow: hidden;
+  background: #0d0a16;
+  z-index: 2;
+}
+.scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.card-scene-fade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.1) 42%, transparent 60%, rgba(0, 0, 0, 0.3) 100%);
+}
+/* metallic tier band */
+.card-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--scene);
+  height: clamp(2px, 4.5cqi, 7px);
+  background: var(--band);
+  box-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.45),
+    0 -1px 0 rgba(255, 255, 255, 0.25);
+  z-index: 3;
+}
+.tier-1 {
+  --tier: var(--tier-1);
+  --band: linear-gradient(90deg, #5a2d10, #c67a3f 28%, #f3c99a 50%, #d08a52 72%, #6b3a1a);
+  --lacquer-tier: linear-gradient(160deg, #6a3a16, #3b1f0b 70%);
+}
+.tier-2 {
+  --tier: var(--tier-2);
+  --band: linear-gradient(90deg, #4b505e, #b9c0cd 28%, #ffffff 50%, #aab0bf 72%, #454a57);
+  --lacquer-tier: linear-gradient(160deg, #4d5468, #232733 70%);
+}
+.tier-3 {
+  --tier: var(--tier-3);
+  --band: linear-gradient(90deg, #3a1d5e, #9a6bc8 28%, #f3dc9a 50%, #8b5bb8 72%, #2e1649);
+  --lacquer-tier: linear-gradient(160deg, #5a3590, #2a163f 70%);
+}
+/* embossed tier emblem on the parchment */
+.card-mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--scene);
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  padding-bottom: clamp(6px, 14cqi, 24px);
+  font-size: clamp(16px, 34cqi, 64px);
+  color: rgba(120, 90, 30, 0.16);
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.55));
+  z-index: 1;
+  pointer-events: none;
+}
+.card-top {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: clamp(18px, 32cqi, 60px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 clamp(4px, 9cqi, 16px) 0 clamp(4px, 9cqi, 16px);
+  z-index: 4;
+}
+.card-points {
+  font-family: var(--font-display);
+  font-size: clamp(14px, 30cqi, 56px);
+  font-weight: 700;
+  line-height: 1;
+  color: #f8e7b0;
+  text-shadow:
+    0 1px 0 #6a4a10,
+    0 2px 5px rgba(0, 0, 0, 0.85);
+  font-variant-numeric: tabular-nums;
+}
+.card-bonus {
+  width: clamp(14px, 27cqi, 50px);
+  height: clamp(14px, 27cqi, 50px);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+}
+.card-cost {
+  position: absolute;
+  left: clamp(3px, 6.5cqi, 12px);
+  right: clamp(3px, 6.5cqi, 12px);
+  bottom: clamp(4px, 7cqi, 12px);
+  display: flex;
+  flex-wrap: wrap-reverse;
+  gap: clamp(2px, 3cqi, 6px);
+  z-index: 4;
+}
+.pip {
+  --tok: clamp(13px, 22cqi, 40px);
+}
+.card-mini .card-cost.n4 .pip,
+.card-mini .card-cost.n3 .pip {
+  --tok: clamp(11px, 26cqi, 15px);
+}
+
+/* back: tier lacquer, lattice, a gold seal */
+.card-back {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: clamp(2px, 5cqi, 8px);
+  color: #f3dc9a;
+  background:
+    radial-gradient(100% 70% at 50% 25%, rgba(255, 255, 255, 0.14), transparent 70%),
+    var(--lacquer-tier);
+}
+.card-lattice {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+.card-back-seal {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: clamp(18px, 40cqi, 60px);
+  height: clamp(18px, 40cqi, 60px);
+  border-radius: 50%;
+  font-size: clamp(11px, 22cqi, 34px);
+  color: #efcb6c;
+  background: radial-gradient(circle at 40% 30%, #3d3252, #1a1428 72%);
+  box-shadow:
+    inset 0 0 0 1.5px #c9a24a,
+    0 0 0 3px rgba(201, 162, 74, 0.25),
+    0 2px 6px rgba(0, 0, 0, 0.6);
+}
+.card-back-count,
+.card-back-name {
+  position: relative;
+  z-index: 2;
+  font-family: var(--font-display);
+  font-size: clamp(10px, 20cqi, 20px);
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 7px;
+  border-radius: 99px;
+  color: #f8e7b0;
+  background: rgba(8, 6, 14, 0.7);
+  box-shadow: inset 0 0 0 1px rgba(217, 180, 92, 0.4);
+}
+.card-back-name {
+  font-family: var(--font-title);
+}
+.card-back-count {
+  animation: pop 0.35s ease-out;
+}
+.card-secret {
+  position: absolute;
+  right: -4px;
+  top: -5px;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 11px;
+  color: #3b2a00;
+  background: var(--gold-bevel);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.card-btn.is-affordable .card {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 0 12px 1px rgba(217, 180, 92, 0.6),
+    0 3px 8px rgba(0, 0, 0, 0.6);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+@keyframes breathe {
+  50% {
+    box-shadow:
+      0 0 0 2px var(--accent),
+      0 0 18px 4px rgba(217, 180, 92, 0.75),
+      0 3px 8px rgba(0, 0, 0, 0.6);
+  }
+}
+/* a refilled slot: the card slides in from the deck on the left */
+.card-btn.is-fresh {
+  animation: card-in 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+@keyframes card-in {
+  0% {
+    transform: translateX(-110%) rotate(-6deg) scale(0.92);
+    opacity: 0;
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* --- nobles ---------------------------------------------------------------- */
+
+.guest {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 3px 6px 3px 4px;
+  border-radius: 8px;
+  color: #f6ecd2;
+  background: linear-gradient(160deg, #332a4e, #1d1631);
+  box-shadow:
+    inset 0 0 0 1px #b8902f,
+    inset 0 0 0 2px #1d1631,
+    inset 0 0 0 3px rgba(217, 180, 92, 0.4),
+    0 3px 6px rgba(0, 0, 0, 0.5);
+}
+.portrait {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 30px;
+  aspect-ratio: 48 / 60;
+}
+.portrait > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.portrait .art {
+  inset: 5% 11%;
+  width: 78%;
+  height: 90%;
+  border-radius: 50%;
+}
+.portrait-frame {
+  z-index: 2;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6));
+}
+.portrait-xs {
+  width: 16px;
+  margin-right: -3px;
+}
+.guest-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.guest-name {
+  font-family: var(--font-title);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--gold-light);
+}
+.guest-needs {
+  display: flex;
+  gap: 3px;
+}
+.need {
+  position: relative;
+  display: block;
+  --tok: 17px;
+}
+.need .tok-label {
+  font-size: 10px;
+}
+.need-tick {
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  display: grid;
+  place-items: center;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  color: #fff;
+  background: #2fb86a;
+  box-shadow: 0 0 0 1.2px #0f1a14;
+}
+.need-tick .icon {
+  width: 7px;
+  height: 7px;
+  stroke-width: 3.5;
+}
+.guest-points {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 20px;
+  padding: 0 6px 0 4px;
+  border-radius: 999px;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: #3b2a00;
+  background: var(--gold-bevel);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -1px 0 rgba(90, 62, 14, 0.6),
+    0 1px 2px rgba(0, 0, 0, 0.55);
+}
+.guest-points .icon {
+  width: 12px;
+  height: 12px;
+}
+.guest-large {
+  padding: 10px 12px;
+  gap: 12px;
+  width: 100%;
+  border-radius: var(--radius);
+}
+.guest-large .portrait {
+  width: 58px;
+}
+.guest-large .guest-name {
+  font-size: 17px;
+}
+.guest-large .need {
+  --tok: 26px;
+}
+.guest-large .need .tok-label {
+  font-size: 15px;
+}
+.guest-large .guest-points {
+  height: 28px;
+  padding: 0 10px 0 7px;
+  font-size: 18px;
+}
+.guest-large .guest-points .icon {
+  width: 16px;
+  height: 16px;
+}
+.guest.is-fresh {
+  animation: card-in 0.5s ease-out both;
+}
+
+/* --- crown emblem ---------------------------------------------------------- */
+
+.crown {
+  display: block;
+  overflow: visible;
+}
+
+/* --- buttons: gold bevel / dark lacquer ------------------------------------- */
+
+.btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 18px;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  background: linear-gradient(180deg, #343a5a 0%, #242840 55%, #1b1e30 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(217, 180, 92, 0.55),
+    0 3px 8px rgba(0, 0, 0, 0.45);
+  transition:
+    transform 0.1s,
+    filter 0.2s,
+    opacity 0.2s,
+    box-shadow 0.1s;
+}
+.btn .icon {
+  width: 1.2em;
+  height: 1.2em;
+  color: var(--gold-light);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(217, 180, 92, 0.55);
+}
+.btn:disabled {
+  opacity: 0.42;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.btn-primary {
+  color: var(--ink-on-gold);
+  background: var(--gold-bevel);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -2px 0 #7a5614,
+    0 0 0 1px #6a4a10,
+    0 4px 14px rgba(217, 180, 92, 0.3);
+}
+.btn-primary .icon {
+  color: #5a3e0e;
+}
+.btn-primary:active:not(:disabled) {
+  background: linear-gradient(180deg, #e3bd62, #c4953b);
+  box-shadow:
+    inset 0 2px 5px rgba(90, 60, 10, 0.55),
+    0 0 0 1px #6a4a10;
+}
+.btn-ghost {
+  background: transparent;
+  box-shadow: 0 0 0 1px rgba(217, 180, 92, 0.45);
+  color: var(--muted);
+}
+.btn-ghost .icon {
+  color: var(--accent);
+}
+.btn-small {
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+.btn-block {
+  display: flex;
+  width: 100%;
+}
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 50%;
+  font-size: 20px;
+  color: var(--muted);
+}
+.icon-btn .icon {
+  width: 22px;
+  height: 22px;
+}
+.icon-btn:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* --- sheets ---------------------------------------------------------------- */
+
+.sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  background: rgba(6, 5, 16, 0.66);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: fade-in 0.2s ease-out;
+}
+.sheet-bottom {
+  align-items: flex-end;
+}
+.sheet-center {
+  align-items: center;
+  padding: 16px;
+}
+.sheet {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100dvh - 28px - env(safe-area-inset-top));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 16px calc(16px + env(safe-area-inset-bottom));
+  border-radius: 20px 20px 0 0;
+  background: var(--lacquer);
+  box-shadow:
+    0 -8px 30px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 var(--line-strong),
+    inset 0 0 0 1px rgba(217, 180, 92, 0.25);
+  animation: sheet-up 0.28s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.sheet-center .sheet {
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px var(--line-strong),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  animation: dialog-in 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+.sheet-grip {
+  display: block;
+  width: 40px;
+  height: 4px;
+  margin: 0 auto 4px;
+  border-radius: 2px;
+  background: rgba(217, 180, 92, 0.4);
+}
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  margin-bottom: 6px;
+}
+.sheet-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-title);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--gold-light);
+}
+.sheet-title .icon {
+  color: var(--accent);
+}
+.sheet-note {
+  color: var(--muted);
+  font-size: 13px;
+}
+.reason {
+  min-height: 18px;
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: #ffb4a8;
+  text-align: center;
+}
+.reason.is-info {
+  color: var(--muted);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(40%);
+    opacity: 0.4;
+  }
+}
+@keyframes dialog-in {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+}
+
+/* --- flights --------------------------------------------------------------- */
+
+.flight-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  overflow: hidden;
+}
+.flight {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform, opacity;
+}
+.flight-token {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 45%, #2c2f42 0, #181a27 50%, transparent 52%),
+    radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--c) 60%, white), var(--c) 60%);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.5),
+    0 0 12px color-mix(in srgb, var(--c) 70%, white);
+}
+.flight-card {
+  width: 34px;
+  height: 44px;
+  border-radius: 6px;
+  background: linear-gradient(160deg, #f3e8cf, #e0cea6);
+  box-shadow:
+    inset 0 0 0 1px rgba(190, 145, 48, 0.8),
+    0 0 16px rgba(217, 180, 92, 0.9);
+}
+
+/* --- reduced motion -------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .stars,
+  .gem-spec {
+    animation: none;
+  }
+}

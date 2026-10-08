@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#131726"/>
+  <!-- a faceted sapphire: crown (top), girdle at y=30, pavilion (bottom) -->
+  <polygon points="12,30 22,18 26,30" fill="#5A86DE"/>
+  <polygon points="22,18 42,18 38,30 26,30" fill="#A6C2F2"/>
+  <polygon points="42,18 52,30 38,30" fill="#3461C1"/>
+  <polygon points="12,30 26,30 32,54" fill="#244A9C"/>
+  <polygon points="26,30 38,30 32,54" fill="#5A86DE"/>
+  <polygon points="38,30 52,30 32,54" fill="#1B3A80"/>
+  <!-- a gold spark -->
+  <polygon points="50,6 51.6,10.4 56,12 51.6,13.6 50,18 48.4,13.6 44,12 48.4,10.4" fill="#F3DC9A"/>
+</svg>
