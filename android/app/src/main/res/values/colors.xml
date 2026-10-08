@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- THEME.ui.background: the page paints the same colour at once, so the
+         launch window, the splash and the area behind the system bars match -->
+    <color name="night">#120F20</color>
+</resources>

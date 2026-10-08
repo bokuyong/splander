@@ -1,6 +1,8 @@
 // Tiny synthesized sound effects on the Web Audio API: no audio files, one
 // lazily created AudioContext, short oscillator + envelope voices. Every call
 // is a safe no-op where audio is unavailable (old WebViews, vitest).
+import { Capacitor } from '@capacitor/core'
+import { Haptics } from '@capacitor/haptics'
 import type { StorageLike } from '../controller'
 
 export type SoundName =
@@ -233,7 +235,25 @@ function browserAudioContext(): AudioContextCtor | null {
   return w.AudioContext ?? w.webkitAudioContext ?? null
 }
 
+/**
+ * Inside the native app (Capacitor) the web view has no usable
+ * navigator.vibrate (iOS has none, Android's needs a permission the app does
+ * not request), so the Haptics plugin plays the pattern: buzz, pause, buzz.
+ */
+function nativeVibrate(): ((pattern: number[]) => unknown) | null {
+  if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('Haptics')) return null
+  return (pattern) => {
+    let at = 0
+    pattern.forEach((ms, i) => {
+      if (i % 2 === 0) setTimeout(() => void Haptics.vibrate({ duration: ms }).catch(() => {}), at)
+      at += ms
+    })
+  }
+}
+
 function browserVibrate(): ((pattern: number[]) => unknown) | null {
+  const native = nativeVibrate()
+  if (native) return native
   if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return null
   return (pattern) => navigator.vibrate(pattern)
 }

@@ -108,3 +108,17 @@ PC 한 대에서 온라인을 시험할 때는 탭 두 개를 서로 다른 주�
 | `src/ai/` | 컴퓨터 상대 |
 | `src/net/` | 온라인 (PeerJS, 방 주인 기준 진행) |
 | `src/ui/` | 화면. `src/ui/online/`이 온라인 연결부 |
+
+## 네이티브 앱 (Android / iOS)
+
+같은 `npm run build` 결과물을 [Capacitor](https://capacitorjs.com)로 감싼 스토어용 앱 프로젝트가
+`android/`와 `ios/`에 있습니다. 설정은 `capacitor.config.ts`.
+
+```bash
+npm run cap:sync        # 웹 빌드 + android/, ios/ 에 복사
+npm run android:debug   # 위 + 디버그 APK (android/app/build/outputs/apk/debug/app-debug.apk)
+```
+
+Android는 JDK 21이 필요해요(Android Studio에 들어 있는 `jbr` 폴더를 `JAVA_HOME`으로).
+스토어에 올리는 절차와 필요한 계정·서명·심사 자료는 [docs/release-android.md](docs/release-android.md),
+[docs/release-ios.md](docs/release-ios.md)에 정리했습니다. iOS는 Mac + Xcode가 있어야 빌드됩니다.

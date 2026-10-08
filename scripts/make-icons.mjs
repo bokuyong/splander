@@ -3,11 +3,17 @@
 //
 //   node scripts/make-icons.mjs
 //
+// Writes the PWA icons (public/icons/), the Google Play listing icon (store/),
+// the Android launcher icons
+// (android/app/src/main/res/mipmap-*/) and the iOS app icon
+// (ios/App/App/Assets.xcassets/AppIcon.appiconset/). The native folders are
+// skipped when they do not exist yet (before `npx cap add`).
 // Keep the shapes below in step with public/favicon.svg.
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { crc32, deflateSync } from 'node:zlib'
 
-const BG = '#131726'
+/** Icon background. Also the value of @color/ic_launcher_background on Android. */
+export const BG = '#131726'
 /** Polygons in the SVG's 64x64 user space, in paint order: [[x, y], ...], fill. */
 const SHAPES = [
   // a faceted sapphire: crown (top), girdle at y=30, pavilion (bottom)
@@ -39,7 +45,8 @@ function inside(points, x, y) {
 
 /**
  * @param size   output width = height in pixels
- * @param radius corner radius of the background in SVG units (0 = full bleed)
+ * @param radius corner radius of the background in SVG units (0 = full bleed,
+ *               32 = a circle); `null` draws no background at all (transparent)
  * @param art    scale of the artwork around the centre (maskable icons keep
  *               everything inside the central 80% safe zone)
  */
@@ -61,12 +68,14 @@ function render(size, { radius, art }) {
       }
     }
   }
-  // background: rounded square
-  paint((x, y) => {
-    const dx = Math.max(radius - x, x - (64 - radius), 0)
-    const dy = Math.max(radius - y, y - (64 - radius), 0)
-    return dx * dx + dy * dy <= radius * radius
-  }, BG)
+  // background: rounded square (radius 32 = circle), or nothing
+  if (radius !== null) {
+    paint((x, y) => {
+      const dx = Math.max(radius - x, x - (64 - radius), 0)
+      const dy = Math.max(radius - y, y - (64 - radius), 0)
+      return dx * dx + dy * dy <= radius * radius
+    }, BG)
+  }
   for (const shape of SHAPES) {
     const points = shape.points.map(([x, y]) => [32 + (x - 32) * art, 32 + (y - 32) * art])
     paint((x, y) => inside(points, x, y), shape.fill)
@@ -122,18 +131,45 @@ function png(size, rgba) {
   ])
 }
 
-const dir = new URL('../public/icons/', import.meta.url)
-mkdirSync(dir, { recursive: true })
-const ICONS = [
-  ['icon-192.png', 192, { radius: 14, art: 1 }],
-  ['icon-512.png', 512, { radius: 14, art: 1 }],
-  // maskable: full-bleed background, artwork inside the safe zone
-  ['icon-maskable-512.png', 512, { radius: 0, art: 0.72 }],
-  // iOS rounds the corners itself and shows transparency as black: full bleed
-  ['apple-touch-icon.png', 180, { radius: 0, art: 0.86 }],
-]
-for (const [name, size, opts] of ICONS) {
-  const file = png(size, render(size, opts))
-  writeFileSync(new URL(name, dir), file)
-  console.log(`${name}  ${size}x${size}  ${file.length} bytes`)
+const root = new URL('../', import.meta.url)
+const cache = new Map()
+function write(relative, size, opts) {
+  const key = `${size}:${opts.radius}:${opts.art}`
+  if (!cache.has(key)) cache.set(key, png(size, render(size, opts)))
+  const file = cache.get(key)
+  const target = new URL(relative, root)
+  mkdirSync(new URL('./', target), { recursive: true })
+  writeFileSync(target, file)
+  console.log(`${relative}  ${size}x${size}  ${file.length} bytes`)
 }
+
+// --- PWA (public/icons) ----------------------------------------------------------
+const ROUNDED = { radius: 14, art: 1 }
+write('public/icons/icon-192.png', 192, ROUNDED)
+write('public/icons/icon-512.png', 512, ROUNDED)
+// maskable: full-bleed background, artwork inside the safe zone
+write('public/icons/icon-maskable-512.png', 512, { radius: 0, art: 0.72 })
+// iOS rounds the corners itself and shows transparency as black: full bleed
+write('public/icons/apple-touch-icon.png', 180, { radius: 0, art: 0.86 })
+
+// --- Android launcher (adaptive + legacy) ------------------------------------------
+// Adaptive icons: a 108dp foreground over @color/ic_launcher_background (= BG);
+// the launcher masks it, so the artwork stays inside the central 66dp circle.
+// Legacy icons (Android 7 and older) are drawn complete at 48dp.
+if (existsSync(new URL('android/app/src/main/res/', root))) {
+  const DENSITIES = { mdpi: 1, hdpi: 1.5, xhdpi: 2, xxhdpi: 3, xxxhdpi: 4 }
+  for (const [name, scale] of Object.entries(DENSITIES)) {
+    const dir = `android/app/src/main/res/mipmap-${name}/`
+    write(`${dir}ic_launcher_foreground.png`, 108 * scale, { radius: null, art: 0.72 })
+    write(`${dir}ic_launcher.png`, 48 * scale, ROUNDED)
+    write(`${dir}ic_launcher_round.png`, 48 * scale, { radius: 32, art: 0.8 })
+  }
+}
+
+// --- iOS app icon (1024, opaque: the App Store rejects alpha) ------------------------
+if (existsSync(new URL('ios/App/App/Assets.xcassets/AppIcon.appiconset/', root))) {
+  write('ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png', 1024, { radius: 0, art: 0.86 })
+}
+
+// --- Store listing icon (Google Play wants 512, opaque) ------------------------------
+write('store/play-icon-512.png', 512, { radius: 0, art: 0.86 })

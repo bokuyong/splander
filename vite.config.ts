@@ -14,7 +14,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      injectRegister: 'auto',
+      // Registration lives in src/main.tsx (same one-liner the plugin would
+      // inject) so the native app (Capacitor) can skip it: its files are local.
+      injectRegister: null,
       // the workbox glob below already picks the icons up
       includeManifestIcons: false,
       manifest: {
