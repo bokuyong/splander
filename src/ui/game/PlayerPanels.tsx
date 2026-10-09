@@ -7,8 +7,10 @@ import { AnimatedNumber } from '../components/AnimatedNumber'
 import { CardView } from '../components/CardView'
 import { Chip } from '../components/Chip'
 import { Glyph } from '../components/Glyph'
-import { CrownIcon, RobotIcon, UserIcon } from '../components/Icons'
+import { CrownIcon, EmoteIcon, RobotIcon, UserIcon } from '../components/Icons'
 import { NobleCrest } from '../components/NobleCrest'
+import { EmoteBubble } from './Emotes'
+import type { Bubble } from './Emotes'
 
 function bonusOf(bonuses: ColorMap, color: TokenColor): number | null {
   return color === 'gold' ? null : bonuses[color]
@@ -44,10 +46,12 @@ interface OpponentPanelProps {
   thinking: boolean
   highlight: boolean
   winner: boolean
+  /** The emote this player is flashing right now, if any. */
+  emote?: Bubble
   onOpen: () => void
 }
 
-export function OpponentPanel({ player, seat, active, thinking, highlight, winner, onOpen }: OpponentPanelProps) {
+export function OpponentPanel({ player, seat, active, thinking, highlight, winner, emote, onOpen }: OpponentPanelProps) {
   const score = engine.getScore(player)
   return (
     <button
@@ -57,6 +61,7 @@ export function OpponentPanel({ player, seat, active, thinking, highlight, winne
       onClick={onOpen}
       aria-label={`${player.name} 자세히 보기`}
     >
+      <EmoteBubble bubble={emote} side="top" />
       <span className="opp-head">
         <span className="opp-name">
           <span className="opp-kind" aria-hidden="true">
@@ -101,11 +106,25 @@ interface MyAreaProps {
   highlight: boolean
   /** Reserved cards the viewer could buy right now. */
   affordableIds: ReadonlySet<string>
+  /** The emote the viewer is flashing right now, if any. */
+  emote?: Bubble
   onOpenReserved: (reserved: ReservedCard) => void
   onOpenSelf: () => void
+  /** Opens the emote picker; without it the emote button is not shown. */
+  onEmote?: () => void
 }
 
-export function MyArea({ player, seat, active, highlight, affordableIds, onOpenReserved, onOpenSelf }: MyAreaProps) {
+export function MyArea({
+  player,
+  seat,
+  active,
+  highlight,
+  affordableIds,
+  emote,
+  onOpenReserved,
+  onOpenSelf,
+  onEmote,
+}: MyAreaProps) {
   const bonuses = engine.getBonuses(player)
   const score = engine.getScore(player)
   const held = engine.tokenCount(player)
@@ -115,23 +134,31 @@ export function MyArea({ player, seat, active, highlight, affordableIds, onOpenR
       data-anchor={`seat-${seat}`}
       aria-label="내 상점"
     >
-      <button type="button" className="me-head" onClick={onOpenSelf} aria-label="내 상점 자세히 보기">
-        <span className="me-name">{player.name}</span>
-        {player.nobles.length > 0 && (
-          <span className="me-guests">
-            {player.nobles.map((n) => (
-              <NobleCrest key={n.id} noble={n} className="portrait-xs" />
-            ))}
+      <EmoteBubble bubble={emote} side="bottom" />
+      <div className="me-head">
+        <button type="button" className="me-self" onClick={onOpenSelf} aria-label="내 상점 자세히 보기">
+          <span className="me-name">{player.name}</span>
+          {player.nobles.length > 0 && (
+            <span className="me-guests">
+              {player.nobles.map((n) => (
+                <NobleCrest key={n.id} noble={n} className="portrait-xs" />
+              ))}
+            </span>
+          )}
+          <span className={`me-held${held >= MAX_TOKENS ? ' is-full' : ''}`}>
+            {THEME.labels.tokens} {held}/{MAX_TOKENS}
           </span>
+          <span className="score score-big">
+            <AnimatedNumber value={score} />
+            <small>점</small>
+          </span>
+        </button>
+        {onEmote && (
+          <button type="button" className="icon-btn emote-btn" onClick={onEmote} aria-label="감정 표현 보내기">
+            <EmoteIcon />
+          </button>
         )}
-        <span className={`me-held${held >= MAX_TOKENS ? ' is-full' : ''}`}>
-          {THEME.labels.tokens} {held}/{MAX_TOKENS}
-        </span>
-        <span className="score score-big">
-          <AnimatedNumber value={score} />
-          <small>점</small>
-        </span>
-      </button>
+      </div>
       <div className="me-body">
         <div className="me-res">
           {TOKEN_COLORS.map((color) => {

@@ -26,6 +26,7 @@ import {
 import { SOUND_LABEL, useSoundMuted } from '../logic/useSound'
 import { CardSheet, DeckSheet } from './CardSheet'
 import type { CardPlace } from './CardSheet'
+import { EmotePicker, useEmotes } from './Emotes'
 import { DiscardModal, GuestChoiceModal, GuestSheet, LogSheet, PlayerSheet } from './Modals'
 import { GameOverScreen, GuestArrival, HandoffScreen } from './Overlays'
 import { MyArea, OpponentPanel } from './PlayerPanels'
@@ -62,6 +63,7 @@ type Open =
   | { kind: 'menu' }
   | { kind: 'log' }
   | { kind: 'howto' }
+  | { kind: 'emote' }
   | null
 
 const HANDOFF_DELAY_MS = 1100
@@ -79,6 +81,8 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
   const hotseat = mySeats.length > 1
   useGameSounds(snap, hotseat)
   const muted = useSoundMuted()
+  const bubbles = useEmotes(controller, mySeats)
+  const canEmote = typeof controller.sendEmote === 'function'
 
   // --- whose eyes are on the screen ------------------------------------------
   const [ackSeat, setAckSeat] = useState<number | null>(hotseat ? null : (mySeats[0] ?? 0))
@@ -255,6 +259,7 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
             thinking={!over && thinkingSeat === seat}
             highlight={hitSeat === seat}
             winner={over && (state.winners?.includes(seat) ?? false)}
+            emote={bubbles[seat]}
             onOpen={() => setOpen({ kind: 'player', seat })}
           />
         ))}
@@ -340,9 +345,22 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
         active={myTurn}
         highlight={hitSeat === viewer}
         affordableIds={affordableIds}
+        emote={bubbles[viewer]}
         onOpenReserved={(r) => openCard(r.card, 'myReserve')}
         onOpenSelf={() => setOpen({ kind: 'player', seat: viewer })}
+        onEmote={canEmote ? () => setOpen({ kind: 'emote' }) : undefined}
       />
+
+      {/* the picker never shows over a pass-and-play hand-off */}
+      {open?.kind === 'emote' && !showHandoff && (
+        <EmotePicker
+          onPick={(id) => {
+            setOpen(null)
+            controller.sendEmote?.(id, viewer)
+          }}
+          onClose={() => setOpen(null)}
+        />
+      )}
 
       {/* --- sheets --- */}
       {openCardNow && (

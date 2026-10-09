@@ -26,6 +26,7 @@ import {
   type SessionSnapshot,
 } from '../../net'
 import { randomSeed, type ControllerSnapshot, type GameController } from '../controller'
+import { isEmoteId } from '../logic/emotes'
 import { isConnectionError, netErrorText } from './text'
 
 export interface OnlineRoom extends GameController {
@@ -163,6 +164,19 @@ function createRoom(
       derive()
     },
 
+    sendEmote(id, seat) {
+      if (disposed || !isEmoteId(id)) return
+      session.sendEmote(id, seat) // fire and forget; dropped extras are fine
+    },
+
+    subscribeEmotes(listener) {
+      // The host already validates, but a guest trusts nobody: unknown ids
+      // (a newer host with more emotes) are skipped.
+      return session.onEmote((event) => {
+        if (isEmoteId(event.id)) listener(event)
+      })
+    },
+
     startGame() {
       if (disposed || role !== 'host') return false
       const host = session as HostSession
@@ -207,7 +221,9 @@ function createRoom(
 
 export interface HostRoomOptions
   extends OnlineDeps,
-    Partial<Pick<HostSessionOptions, 'transport' | 'storage' | 'aiDelayMs' | 'heartbeatMs' | 'retryDelaysMs' | 'lifecycle'>> {
+    Partial<
+      Pick<HostSessionOptions, 'transport' | 'storage' | 'aiDelayMs' | 'heartbeatMs' | 'retryDelaysMs' | 'lifecycle' | 'now'>
+    > {
   name?: string
   /** Re-open the room saved on this device instead of creating a new one. */
   resume?: boolean
@@ -221,6 +237,7 @@ export function createHostRoom(opts: HostRoomOptions = {}): OnlineRoom {
     hostName: name,
     applyAction: engine.applyAction,
     chooseAiAction: safeAiChooser(engine, chooseAction),
+    validEmote: isEmoteId,
   })
   return createRoom('host', session, engine, seed)
 }

@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { GameState } from '../shared/contract.ts'
 import { GUEST_STORAGE_PREFIX, createGuestSession, getSavedGuestRoom, type GuestSessionOptions } from './guest.ts'
-import { HOST_STORAGE_KEY, createHostSession, getSavedHostRoom, type HostSessionOptions } from './host.ts'
+import {
+  EMOTE_MIN_INTERVAL_MS,
+  HOST_STORAGE_KEY,
+  createHostSession,
+  getSavedHostRoom,
+  type HostSessionOptions,
+} from './host.ts'
 import { PROTOCOL_VERSION, isValidRoomCode, type HostMessage } from './protocol.ts'
 import { isHiddenCard } from './redact.ts'
 import { fakeApplyAction, fakeLifecycle, fakeState, settle, until } from './testkit.ts'
@@ -670,13 +676,149 @@ describe('protocol version', () => {
   it('ignores garbage without disturbing the room', async () => {
     const { net, host, guest, code } = await pair()
     const client = await rawClient(net, code)
-    for (const junk of [null, 42, 'hi', [], {}, { v: PROTOCOL_VERSION }, { v: PROTOCOL_VERSION, type: 'nope' }, { v: PROTOCOL_VERSION, type: 'hello' }]) {
+    for (const junk of [null, 42, 'hi', [], {}, { v: PROTOCOL_VERSION }, { v: PROTOCOL_VERSION, type: 'hello' }]) {
       client.conn.send(junk)
     }
-    await until(() => client.inbox.length === 8, 'all junk answered')
+    await until(() => client.inbox.length === 7, 'all junk answered')
     expect(client.inbox.every((m) => m.type === 'error' && m.code === 'bad-message')).toBe(true)
     expect(host.getSnapshot().lobby?.seats[1].name).toBe('Jiho')
     expect(guest.getSnapshot().status).toBe('connected')
+  })
+
+  it('ignores an unknown message type instead of treating it as fatal', async () => {
+    // Host side: a right-version message of a type this build does not know gets no answer.
+    const { net, host, code } = await hostedRoom()
+    const client = await rawClient(net, code)
+    client.conn.send({ v: PROTOCOL_VERSION, type: 'hello', name: 'Raw' })
+    await until(() => client.inbox.some((m) => m.type === 'welcome'), 'welcome')
+    client.inbox.length = 0
+    client.conn.send({ v: PROTOCOL_VERSION, type: 'high-five', with: 'everyone' })
+    await settle()
+    expect(client.inbox).toEqual([])
+    expect(host.getSnapshot().lobby?.seats[1].online).toBe(true)
+
+    // Guest side: a newer host's extra message is dropped and the game goes on.
+    const net2 = createMemoryNetwork()
+    await net2.listen('QQQQQ', (conn) => {
+      conn.onMessage((raw) => {
+        const m = raw as { type: string }
+        if (m.type !== 'hello') return
+        const lobby = { roomCode: 'QQQQQ', started: true, seats: [] }
+        conn.send({ v: PROTOCOL_VERSION, type: 'welcome', seat: 1, token: 't', lobby, state: null, rev: 0 })
+        conn.send({ v: PROTOCOL_VERSION, type: 'confetti', amount: 'lots' })
+        conn.send({ v: PROTOCOL_VERSION, type: 'state', state: fakeState(), rev: 1 })
+      })
+    })
+    const guest = makeGuest(net2, 'QQQQQ', 'Jiho', createMemoryStorage())
+    await until(() => guest.getSnapshot().rev === 1, 'guest got the state after the unknown message')
+    expect(guest.getSnapshot().status).toBe('connected')
+    expect(guest.getSnapshot().lastError).toBeNull()
+  })
+})
+
+describe('emotes', () => {
+  it('broadcasts a guest emote to everyone with its seat, the host included', async () => {
+    const { host, guest } = await pair({ validEmote: (id) => id === 'clap' || id === 'cool' })
+    const hostHeard: unknown[] = []
+    const guestHeard: unknown[] = []
+    host.onEmote((e) => hostHeard.push(e))
+    guest.onEmote((e) => guestHeard.push(e))
+    expect(guest.sendEmote('clap')).toBe(true)
+    await until(() => hostHeard.length === 1, 'host heard the emote')
+    await until(() => guestHeard.length === 1, 'guest got its own emote back')
+    expect(hostHeard[0]).toEqual({ seat: 1, id: 'clap', at: expect.any(Number) })
+    expect(guestHeard[0]).toEqual(hostHeard[0])
+    expect(Object.isFrozen(hostHeard[0])).toBe(true)
+    // The guest may not impersonate another seat.
+    expect(guest.sendEmote('clap', 0)).toBe(false)
+  })
+
+  it('sends the host’s own emote to guests and to its own listeners', async () => {
+    const { host, guest } = await pair()
+    const guestHeard: unknown[] = []
+    const hostHeard: unknown[] = []
+    guest.onEmote((e) => guestHeard.push(e))
+    const off = host.onEmote((e) => hostHeard.push(e))
+    expect(host.sendEmote('cool')).toBe(true)
+    await until(() => guestHeard.length === 1, 'guest heard the host')
+    expect(guestHeard[0]).toEqual({ seat: 0, id: 'cool', at: expect.any(Number) })
+    expect(hostHeard).toEqual(guestHeard)
+    // Only local seats can speak from the host device.
+    expect(host.sendEmote('cool', 1)).toBe(false)
+    off()
+  })
+
+  it('drops unknown or malformed ids on the host and on the guest', async () => {
+    const { net, host, guest, code } = await pair({ validEmote: (id) => id === 'clap' })
+    const hostHeard: unknown[] = []
+    const guestHeard: unknown[] = []
+    host.onEmote((e) => hostHeard.push(e))
+    guest.onEmote((e) => guestHeard.push(e))
+    expect(guest.sendEmote('🎉')).toBe(false) // not even well-formed: never sent
+    expect(guest.sendEmote('wave')).toBe(true) // well-formed, but not in the host's set
+    expect(host.sendEmote('wave')).toBe(false)
+    expect(host.sendEmote('')).toBe(false)
+    host.setSeat(2, { kind: 'remote' }) // a seat for the hand-rolled client
+    const client = await rawClient(net, code)
+    client.conn.send({ v: PROTOCOL_VERSION, type: 'hello', name: 'Raw' })
+    await until(() => client.inbox.some((m) => m.type === 'welcome'), 'welcome')
+    client.inbox.length = 0
+    client.conn.send({ v: PROTOCOL_VERSION, type: 'emote', id: 42 })
+    client.conn.send({ v: PROTOCOL_VERSION, type: 'emote', id: 'x'.repeat(40) })
+    client.conn.send({ v: PROTOCOL_VERSION, type: 'emote' })
+    await until(() => client.inbox.length === 3, 'malformed emotes answered')
+    expect(client.inbox.every((m) => m.type === 'error' && m.code === 'bad-message')).toBe(true)
+    await settle()
+    expect(hostHeard).toEqual([])
+    expect(guestHeard).toEqual([])
+  })
+
+  it('rate-limits each seat to one emote per interval, silently', async () => {
+    let clock = 1_000_000
+    const { host, guest } = await pair({ now: () => clock })
+    const hostHeard: { seat: number; id: string }[] = []
+    const guestHeard: { seat: number; id: string }[] = []
+    host.onEmote((e) => hostHeard.push({ seat: e.seat, id: e.id }))
+    guest.onEmote((e) => guestHeard.push({ seat: e.seat, id: e.id }))
+
+    expect(host.sendEmote('clap')).toBe(true)
+    expect(host.sendEmote('cool')).toBe(false) // too soon
+    clock += EMOTE_MIN_INTERVAL_MS - 1
+    expect(host.sendEmote('cool')).toBe(false)
+    clock += 1
+    expect(host.sendEmote('cool')).toBe(true)
+    // Seats are limited independently: the guest is not blocked by the host.
+    expect(guest.sendEmote('wow')).toBe(true)
+    expect(guest.sendEmote('cry')).toBe(true) // "sent"; the host drops it without a word
+    await until(() => guestHeard.length === 3, 'guest heard what got through')
+    await settle()
+    expect(guestHeard).toEqual([
+      { seat: 0, id: 'clap' },
+      { seat: 0, id: 'cool' },
+      { seat: 1, id: 'wow' },
+    ])
+    expect(hostHeard).toEqual(guestHeard)
+    expect(guest.getSnapshot().lastError).toBeNull()
+    expect(host.getSnapshot().lastError).toBeNull()
+  })
+
+  it('refuses to send while disconnected and stops listening after close', async () => {
+    const { net, host, guest, code } = await pair()
+    const heard: unknown[] = []
+    guest.onEmote((e) => heard.push(e))
+    net.offline = true
+    net.dropConnections(code)
+    await until(() => guest.getSnapshot().status === 'reconnecting', 'guest reconnecting')
+    expect(guest.sendEmote('clap')).toBe(false)
+    net.offline = false
+    await until(() => guest.getSnapshot().status === 'connected', 'guest back')
+    guest.close()
+    expect(guest.sendEmote('clap')).toBe(false)
+    expect(host.sendEmote('clap')).toBe(true) // fine with nobody listening
+    await settle()
+    expect(heard).toEqual([])
+    host.close()
+    expect(host.sendEmote('clap')).toBe(false)
   })
 })
 

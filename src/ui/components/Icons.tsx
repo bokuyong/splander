@@ -238,6 +238,15 @@ export const SpeakerOffIcon = (p: IconProps) => (
   </Icon>
 )
 
+export const EmoteIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="8.5" fill="currentColor" fillOpacity="0.12" />
+    <path d="M8.5 14.2c.9 1.3 2.1 1.9 3.5 1.9s2.6-.6 3.5-1.9" />
+    <circle cx="9.2" cy="9.8" r="1" fill="currentColor" stroke="none" />
+    <circle cx="14.8" cy="9.8" r="1" fill="currentColor" stroke="none" />
+  </Icon>
+)
+
 export const CardsIcon = (p: IconProps) => (
   <Icon {...p}>
     <rect x="3" y="5" width="11" height="15" rx="2" fill="currentColor" fillOpacity="0.15" />

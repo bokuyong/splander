@@ -4,8 +4,10 @@ import type { Action, Difficulty, GameState } from '../shared/contract.ts'
 import {
   PROTOCOL_VERSION,
   generateRoomCode,
+  isEmoteIdShape,
   isValidRoomCode,
   parseGuestMessage,
+  type EmoteEvent,
   type HostMessage,
   type Lobby,
   type LobbySeat,
@@ -40,6 +42,8 @@ const MAX_NAME_LENGTH = 16
 const SAVE_VERSION = 1
 /** How long a connection stays up after a final error message, so it can arrive. */
 const GOODBYE_MS = 150
+/** A seat may flash one emote per this interval; extras are dropped silently. */
+export const EMOTE_MIN_INTERVAL_MS = 1500
 
 export interface HostSessionOptions {
   transport: Transport
@@ -58,6 +62,11 @@ export interface HostSessionOptions {
   chooseAiAction?: (state: GameState, difficulty: Difficulty) => Action | Promise<Action>
   /** Pause before each AI move, so humans can follow. Default 900. */
   aiDelayMs?: number
+  /**
+   * Which emote ids exist (the UI owns the set). Anything else from a guest
+   * or from sendEmote is dropped. Default: any well-formed id.
+   */
+  validEmote?: (id: string) => boolean
   /** Where the room is saved. Default: localStorage. */
   storage?: KeyValueStorage
   /**
@@ -74,6 +83,7 @@ export interface HostSessionOptions {
   /** Test hooks. */
   random?: () => number
   generateToken?: () => string
+  now?: () => number
 }
 
 interface SeatRec {
@@ -84,6 +94,8 @@ interface SeatRec {
   token: string | null
   conn: Connection | null
   lastSeen: number
+  /** When this seat last flashed an emote (rate limiting). */
+  lastEmoteAt: number
 }
 
 interface SavedSeat {
@@ -149,6 +161,9 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
   const heartbeatMs = opts.heartbeatMs ?? 5000
   const newToken = opts.generateToken ?? defaultGenerateToken
   const random = opts.random ?? Math.random
+  const now = opts.now ?? Date.now
+  const validEmote = opts.validEmote ?? (() => true)
+  const emoteListeners = new Set<(event: EmoteEvent) => void>()
   const sleeper = createSleeper()
 
   // ---- authoritative data ----
@@ -163,15 +178,15 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
   if (saved) {
     resumed = true
     roomCode = saved.roomCode
-    seats = saved.seats.map((s) => ({ ...s, conn: null, lastSeen: 0 }))
+    seats = saved.seats.map((s) => ({ ...s, conn: null, lastSeen: 0, lastEmoteAt: 0 }))
     started = saved.started && saved.state !== null
     state = started ? saved.state : null
     rev = saved.rev
   } else {
     roomCode = generateRoomCode(random)
     seats = [
-      { kind: 'local', name: cleanName(opts.hostName ?? '', '방장'), token: null, conn: null, lastSeen: 0 },
-      { kind: 'remote', name: '', token: null, conn: null, lastSeen: 0 },
+      { kind: 'local', name: cleanName(opts.hostName ?? '', '방장'), token: null, conn: null, lastSeen: 0, lastEmoteAt: 0 },
+      { kind: 'remote', name: '', token: null, conn: null, lastSeen: 0, lastEmoteAt: 0 },
     ]
   }
 
@@ -338,6 +353,25 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
     }
   }
 
+  // ---- emotes ----
+
+  /**
+   * Validates, rate-limits and broadcasts an emote from `seatIndex` (a guest's
+   * or one of the host's own). Everyone hears it, the host's own UI through
+   * the onEmote listeners. Returns false when it was dropped.
+   */
+  function emote(seatIndex: number, id: unknown): boolean {
+    const seat = seats[seatIndex]
+    if (!seat || !isEmoteIdShape(id) || !validEmote(id)) return false
+    const at = now()
+    if (at - seat.lastEmoteAt < EMOTE_MIN_INTERVAL_MS) return false
+    seat.lastEmoteAt = at
+    const event: EmoteEvent = Object.freeze({ seat: seatIndex, id, at })
+    for (const s of seats) if (s.conn) send(s.conn, { v: PROTOCOL_VERSION, type: 'emote', ...event })
+    for (const l of [...emoteListeners]) l(event)
+    return true
+  }
+
   // ---- game ----
 
   function tryApply(action: Action): NetError | null {
@@ -420,9 +454,10 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
         )
         closeSoon(conn)
         if (i !== -1 && publish()) broadcastLobby()
-      } else {
+      } else if (parsed.reason === 'malformed') {
         sendError(conn, 'bad-message', 'Malformed message')
       }
+      // unknown-type: a newer-but-compatible client; nothing to do
       return
     }
     const msg = parsed.msg
@@ -471,6 +506,9 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
         if (err) sendError(conn, err.code, err.message)
         return
       }
+      case 'emote':
+        emote(seatIndex, msg.id) // dropped silently when invalid or too soon
+        return
     }
   }
 
@@ -625,6 +663,19 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
       return true
     },
 
+    sendEmote(id, seat) {
+      if (closed) return false
+      const locals = localSeatList()
+      const from = seat ?? hostViewSeat(locals)
+      if (!locals.includes(from)) return false
+      return emote(from, id)
+    },
+
+    onEmote(listener) {
+      emoteListeners.add(listener)
+      return () => void emoteListeners.delete(listener)
+    },
+
     setSeat(index, config) {
       if (closed) return false
       if (started) return fail('bad-lobby', 'Seats cannot change during a game')
@@ -656,7 +707,7 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
       const old: SeatRec | undefined = seats[index]
       if (config.kind === 'remote') {
         if (old?.kind === 'remote') return true // already an open/claimed guest seat
-        seats[index] = { kind: 'remote', name: '', token: null, conn: null, lastSeen: 0 }
+        seats[index] = { kind: 'remote', name: '', token: null, conn: null, lastSeen: 0, lastEmoteAt: 0 }
       } else {
         if (old) kick(old, 'kicked', 'The host gave your seat to someone else')
         const rec: SeatRec = {
@@ -665,6 +716,7 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
           token: null,
           conn: null,
           lastSeen: 0,
+          lastEmoteAt: 0,
         }
         if (config.kind === 'ai') rec.difficulty = config.difficulty ?? 'normal'
         seats[index] = rec
@@ -732,6 +784,7 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
       registered = false
       const conns = seats.map((s) => s.conn).filter((c): c is Connection => c !== null)
       for (const s of seats) s.conn = null
+      emoteListeners.clear()
       if (closeOpts?.forget) {
         removeKey(storage, HOST_STORAGE_KEY)
         for (const c of conns) sendError(c, 'room-closed', 'The host closed the room')

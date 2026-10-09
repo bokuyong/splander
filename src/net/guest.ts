@@ -4,8 +4,10 @@
 import type { Action, GameState } from '../shared/contract.ts'
 import {
   PROTOCOL_VERSION,
+  isEmoteIdShape,
   normalizeRoomCode,
   parseHostMessage,
+  type EmoteEvent,
   type GuestMessage,
   type HostMessage,
   type Lobby,
@@ -101,6 +103,7 @@ export function createGuestSession(opts: GuestSessionOptions): GuestSession {
   let lastHeard = 0
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null
   let probeTimer: ReturnType<typeof setTimeout> | null = null
+  const emoteListeners = new Set<(event: EmoteEvent) => void>()
 
   // Mirrors of what the host sent last.
   let lobby: Lobby | null = null
@@ -213,6 +216,12 @@ export function createGuestSession(opts: GuestSessionOptions): GuestSession {
         return
       case 'pong':
         return
+      case 'emote': {
+        if (!isEmoteIdShape(msg.id)) return
+        const event: EmoteEvent = Object.freeze({ seat: msg.seat, id: msg.id, at: msg.at })
+        for (const l of [...emoteListeners]) l(event)
+        return
+      }
     }
   }
 
@@ -327,6 +336,19 @@ export function createGuestSession(opts: GuestSessionOptions): GuestSession {
       return true
     },
 
+    sendEmote(id, seat) {
+      if (closed || !conn || !welcomed || store.get().status !== 'connected') return false
+      if (!isEmoteIdShape(id)) return false
+      if (seat !== undefined && seat !== mySeat) return false
+      send({ v: PROTOCOL_VERSION, type: 'emote', id })
+      return true
+    },
+
+    onEmote(listener) {
+      emoteListeners.add(listener)
+      return () => void emoteListeners.delete(listener)
+    },
+
     clearError() {
       store.set({ lastError: null })
     },
@@ -353,6 +375,7 @@ export function createGuestSession(opts: GuestSessionOptions): GuestSession {
       generation++
       stopLifecycle()
       stopTimers()
+      emoteListeners.clear()
       const c = conn
       conn = null
       welcomed = false

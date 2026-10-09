@@ -13,6 +13,8 @@
 //   session.subscribe(listener)   -> unsubscribe     (listener takes no args)
 //   session.getSnapshot()         -> SessionSnapshot (immutable, stable ref)
 //   session.sendAction(action)    -> boolean
+//   session.sendEmote(id, seat?)  -> boolean   (see "Emotes" below)
+//   session.onEmote(listener)     -> unsubscribe
 //   session.clearError()
 //   session.retry()
 //   session.close({ forget? })
@@ -110,6 +112,19 @@
 // the redacted view for the device's own player. On a host with several local
 // seats (hot-seat) the view follows whichever local player is to move.
 //
+// Emotes (speech bubbles)
+// -----------------------
+// Transient, not part of the snapshot (they are events, not state):
+//   session.sendEmote('clap')           // from my seat (host hot-seat: the
+//                                       // local seat to move; or pass a seat)
+//   session.onEmote(({ seat, id, at }) => showBubble(seat, id))
+// Only the id travels. The host validates it (option `validEmote`, give it
+// the UI's isEmoteId), drops a seat's extras beyond one per
+// EMOTE_MIN_INTERVAL_MS (1.5 s) silently, and broadcasts { seat, id, at } to
+// every guest and to its own onEmote listeners. A guest sees its own emote
+// come back the same way, so one code path shows every bubble. Unknown ids
+// should still be ignored on receipt (look the id up, skip when missing).
+//
 // Reconnection (mostly automatic)
 // -------------------------------
 //   - Guest: phones drop the link when the screen locks. The session notices
@@ -133,7 +148,7 @@
 // Options worth knowing (all optional unless noted)
 // -------------------------------------------------
 //   host:  applyAction (required), hostName, chooseAiAction, aiDelayMs,
-//          resume, storage, transport, heartbeatMs, retryDelaysMs
+//          validEmote, resume, storage, transport, heartbeatMs, retryDelaysMs
 //   guest: roomCode (required), name (required), storage, transport,
 //          heartbeatMs, retryDelaysMs
 //   `transport` defaults to PeerJS on its public broker (loaded lazily). To
@@ -190,7 +205,7 @@ export function lobbyToPlayers(lobby: Lobby): NewGameConfig['players'] {
   )
 }
 
-export { getSavedHostRoom, clearSavedHostRoom, type SavedHostRoomInfo } from './host.ts'
+export { getSavedHostRoom, clearSavedHostRoom, EMOTE_MIN_INTERVAL_MS, type SavedHostRoomInfo } from './host.ts'
 export { getSavedGuestRoom, type SavedGuestRoomInfo } from './guest.ts'
 export { redactStateFor, isHiddenCard, hiddenCard, HIDDEN_CARD_PREFIX } from './redact.ts'
 export {
@@ -199,6 +214,8 @@ export {
   ROOM_CODE_ALPHABET,
   normalizeRoomCode,
   isValidRoomCode,
+  isEmoteIdShape,
+  type EmoteEvent,
   type Lobby,
   type LobbySeat,
   type SeatKind,

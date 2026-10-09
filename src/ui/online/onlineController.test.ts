@@ -293,3 +293,48 @@ describe('online rooms', () => {
     expect(connectionNotice(g.session.getSnapshot())?.text).toBe('방 주인이 방을 닫았어요')
   }, 30000)
 })
+
+describe('online emotes', () => {
+  it('carries emotes between the rooms, tagged with the sender’s seat', async () => {
+    let clock = 1_000_000
+    const { h, g } = await seated({ now: () => clock })
+    expect(h.startGame()).toBe(true)
+    await until(() => g.hasGame(), 'guest has the game')
+    const hostHeard: { seat: number; id: string }[] = []
+    const guestHeard: { seat: number; id: string }[] = []
+    h.subscribeEmotes!((e) => hostHeard.push({ seat: e.seat, id: e.id }))
+    const off = g.subscribeEmotes!((e) => guestHeard.push({ seat: e.seat, id: e.id }))
+
+    g.sendEmote!('clap')
+    await until(() => hostHeard.length === 1, 'host heard the guest')
+    await until(() => guestHeard.length === 1, 'guest saw its own bubble')
+    expect(hostHeard).toEqual([{ seat: 1, id: 'clap' }])
+    expect(guestHeard).toEqual(hostHeard)
+
+    h.sendEmote!('nice')
+    await until(() => guestHeard.length === 2, 'guest heard the host')
+    expect(guestHeard[1]).toEqual({ seat: 0, id: 'nice' })
+    expect(hostHeard[1]).toEqual({ seat: 0, id: 'nice' })
+
+    // Not an emote: never leaves the device, never arrives.
+    g.sendEmote!('not-an-emote')
+    h.sendEmote!('🎉')
+    await tick()
+    await tick()
+    expect(hostHeard).toHaveLength(2)
+    expect(guestHeard).toHaveLength(2)
+    expect(h.getSnapshot().error).toBeNull()
+    expect(g.getSnapshot().error).toBeNull()
+
+    // The host's seat is still inside its rate-limit window: dropped without a word.
+    h.sendEmote!('gg')
+    await tick()
+    expect(hostHeard).toHaveLength(2)
+
+    off()
+    clock += 2000
+    h.sendEmote!('gg')
+    await until(() => hostHeard.length === 3, 'host heard itself')
+    expect(guestHeard).toHaveLength(2)
+  })
+})

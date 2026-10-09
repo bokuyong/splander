@@ -12,6 +12,10 @@ import type {
 } from '../shared/contract'
 import { CARDS, NOBLES } from '../data'
 import { engine as realEngine } from '../engine'
+import { aiReaction, aiSeats } from './logic/aiReactions'
+import { isEmoteId, type EmoteEvent } from './logic/emotes'
+
+export type { EmoteEvent } from './logic/emotes'
 
 export interface ControllerSnapshot {
   /**
@@ -41,6 +45,15 @@ export interface GameController {
   rematch?(): void
   /** Optional: stops timers / closes connections when the game screen goes away. */
   dispose?(): void
+  /**
+   * Optional: flashes an emote (see src/ui/logic/emotes.ts) over `seat`'s
+   * panel on every player's screen. `seat` must be one of mySeats and
+   * defaults to the seat whose turn it is (or the first of mine). Unknown ids
+   * are ignored. Without it the emote button is hidden.
+   */
+  sendEmote?(id: string, seat?: number): void
+  /** Optional: emotes to show, from every seat including my own and AI seats. */
+  subscribeEmotes?(listener: (event: EmoteEvent) => void): () => void
 }
 
 // --- Saved games -------------------------------------------------------------
@@ -132,6 +145,11 @@ export interface LocalControllerConfig {
   chooseAction: ChooseAction
   /** Pause before each AI move so a human can follow. 0 = move synchronously. Default 1100. */
   aiDelayMs?: number
+  /**
+   * Pause between a move and an AI's emote about it. Default 600, or 0
+   * (synchronous) when aiDelayMs is 0.
+   */
+  aiReactionDelayMs?: number
   /** Where to save. Default localStorage; null disables saving. */
   storage?: StorageLike | null
   /** Rules engine; only replaced in tests. */
@@ -146,8 +164,13 @@ export function createLocalController(config: LocalControllerConfig): GameContro
   const eng = config.engine ?? realEngine
   const storage = config.storage === undefined ? defaultStorage() : config.storage
   const aiDelayMs = config.aiDelayMs ?? 1100
+  const reactionDelayMs = config.aiReactionDelayMs ?? (aiDelayMs <= 0 ? 0 : 600)
   const listeners = new Set<() => void>()
+  const emoteListeners = new Set<(event: EmoteEvent) => void>()
   let timer: ReturnType<typeof setTimeout> | null = null
+  const reactionTimers = new Set<ReturnType<typeof setTimeout>>()
+  /** Turn of each AI seat's last reaction, to keep them rare. */
+  const lastReactionTurn = new Map<number, number>()
   let disposed = false
 
   function newGame(players: NewGameConfig['players'], seed: number): GameState {
@@ -177,9 +200,49 @@ export function createLocalController(config: LocalControllerConfig): GameContro
   }
 
   function commit(next: GameState): void {
+    const prev = state
     state = next
     writeSave(storage, state)
     publish({ state, mySeats: humanSeats(state), thinkingSeat: aiToMove(state), error: null })
+    reactToMove(prev, next)
+  }
+
+  function emitEmote(event: EmoteEvent): void {
+    for (const listener of [...emoteListeners]) listener(event)
+  }
+
+  function later(fn: () => void, delay: number): void {
+    if (delay <= 0) {
+      fn()
+      return
+    }
+    const t = setTimeout(() => {
+      reactionTimers.delete(t)
+      if (!disposed) fn()
+    }, delay)
+    reactionTimers.add(t)
+  }
+
+  function clearReactions(): void {
+    for (const t of reactionTimers) clearTimeout(t)
+    reactionTimers.clear()
+  }
+
+  /**
+   * Lets the computer seats comment on `prev` -> `next`. Only one AI speaks
+   * about any one move (the first that has something to say), except at the
+   * end of the game, where every AI reacts to its own result.
+   */
+  function reactToMove(prev: GameState, next: GameState): void {
+    if (prev === next) return
+    const ended = next.phase === 'gameOver' && prev.phase !== 'gameOver'
+    for (const seat of aiSeats(next)) {
+      const id = aiReaction(prev, next, seat, lastReactionTurn.get(seat) ?? null)
+      if (!id) continue
+      lastReactionTurn.set(seat, next.turn)
+      later(() => emitEmote({ seat, id, at: Date.now() }), reactionDelayMs)
+      if (!ended) return
+    }
   }
 
   function aiMove(): void {
@@ -250,10 +313,25 @@ export function createLocalController(config: LocalControllerConfig): GameContro
     clearError() {
       if (snapshot.error !== null) publish({ error: null })
     },
+    sendEmote(id, seat) {
+      if (disposed || !isEmoteId(id)) return
+      const humans = humanSeats(state)
+      const from = seat ?? (humans.includes(state.currentPlayer) ? state.currentPlayer : humans[0])
+      if (from === undefined || !humans.includes(from)) return
+      emitEmote({ seat: from, id, at: Date.now() })
+    },
+    subscribeEmotes(listener) {
+      emoteListeners.add(listener)
+      return () => {
+        emoteListeners.delete(listener)
+      }
+    },
     rematch() {
       if (disposed) return
       if (timer !== null) clearTimeout(timer)
       timer = null
+      clearReactions()
+      lastReactionTurn.clear()
       // Same people, next seat starts: taking turns at going first is only fair.
       const seats = state.players.map((p) => ({
         name: p.name,
@@ -268,7 +346,9 @@ export function createLocalController(config: LocalControllerConfig): GameContro
       disposed = true
       if (timer !== null) clearTimeout(timer)
       timer = null
+      clearReactions()
       listeners.clear()
+      emoteListeners.clear()
     },
   }
 }

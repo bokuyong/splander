@@ -1,7 +1,7 @@
 // Public types of the session facade (see index.ts for the walkthrough).
 
 import type { Action, Difficulty, GameState } from '../shared/contract.ts'
-import type { Lobby, NetError } from './protocol.ts'
+import type { EmoteEvent, Lobby, NetError } from './protocol.ts'
 
 /**
  * connecting   : first attempt to create / join the room is in flight
@@ -50,6 +50,17 @@ export interface Session {
    * the outcome arrives as a new `state` or as `lastError`.
    */
   sendAction(action: Action): boolean
+  /**
+   * Flashes an emote over one of this device's seats (default: the local
+   * seat to move, else the first local seat). The host validates the id,
+   * rate-limits each seat to one emote per EMOTE_MIN_INTERVAL_MS and
+   * broadcasts it; it comes back through onEmote on every device, including
+   * the sender's. Returns false when it was not sent (closed, not seated,
+   * unknown id, too soon). Emotes are fire-and-forget: never an error.
+   */
+  sendEmote(id: string, seat?: number): boolean
+  /** Emotes from every seat (my own included). Returns the unsubscribe function. */
+  onEmote(listener: (event: EmoteEvent) => void): () => void
   clearError(): void
   /** Restart connecting after status became 'disconnected' (or skip a backoff wait). */
   retry(): void

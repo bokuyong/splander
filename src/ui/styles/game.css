@@ -691,9 +691,31 @@
 .me-head {
   display: flex;
   align-items: center;
+  gap: 6px;
+  min-height: 30px;
+}
+.me-self {
+  flex: 1;
+  display: flex;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
   min-height: 30px;
   text-align: left;
+}
+/* a full 44px target that still sits inside the 30px head row */
+.emote-btn {
+  margin: -7px -6px -7px 0;
+  color: var(--gold-light);
+  background: rgba(10, 12, 22, 0.35);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.emote-btn .icon {
+  width: 24px;
+  height: 24px;
+}
+.emote-btn:active {
+  background: rgba(217, 180, 92, 0.22);
 }
 .me-name {
   font-family: var(--font-title);
@@ -794,6 +816,148 @@
   border: 1.5px dashed rgba(255, 255, 255, 0.16);
   font-size: 11px;
   color: rgba(255, 255, 255, 0.22);
+}
+
+/* --- emotes ---------------------------------------------------------------- */
+
+/* bubbles overflow their panel onto the rows next to it */
+.opps,
+.me,
+.opp {
+  position: relative;
+}
+.opps,
+.me {
+  z-index: 2;
+}
+.emote-bubble {
+  position: absolute;
+  left: 10px;
+  z-index: 20;
+  max-width: 72vw;
+  padding: 6px 13px;
+  border-radius: 16px;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.25;
+  white-space: nowrap;
+  text-align: left;
+  color: var(--ink-on-gold);
+  background: var(--gold-bevel);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -2px 0 #7a5614,
+    0 0 0 1px #6a4a10,
+    0 6px 18px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  animation: emote-bubble 2.9s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+.emote-bubble.is-emoji {
+  padding: 3px 10px 4px;
+  font-size: 30px;
+  line-height: 1.15;
+  text-shadow: none;
+}
+.emote-bubble::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  width: 11px;
+  height: 11px;
+  background: #ecc968;
+  transform: rotate(45deg);
+}
+.emote-bubble.is-top {
+  top: calc(100% - 4px);
+  transform-origin: 18px top;
+}
+.emote-bubble.is-top::after {
+  top: -5px;
+  box-shadow: -1px -1px 0 #6a4a10;
+  background: #f6e3a6;
+}
+.emote-bubble.is-bottom {
+  bottom: calc(100% - 4px);
+  transform-origin: 18px bottom;
+}
+.emote-bubble.is-bottom::after {
+  bottom: -5px;
+  box-shadow: 1px 1px 0 #6a4a10;
+  background: #c9952f;
+}
+@keyframes emote-bubble {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  10% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  16% {
+    transform: scale(1);
+  }
+  84% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+}
+@keyframes emote-fade {
+  0% {
+    opacity: 0;
+  }
+  6%,
+  84% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.emote-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.emote-pick {
+  display: grid;
+  place-items: center;
+  min-height: 54px;
+  border-radius: 12px;
+  background: rgba(10, 12, 22, 0.45);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: transform 0.1s;
+}
+.emote-pick.is-emoji {
+  font-size: 30px;
+  line-height: 1;
+}
+.emote-pick:active {
+  transform: scale(0.94);
+  background: rgba(217, 180, 92, 0.2);
+}
+.emote-phrases {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.emote-pick.is-phrase {
+  min-height: 46px;
+  padding: 0 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gold-light);
+}
+.emote-sheet .sheet-note {
+  margin: 12px 0 0;
+  text-align: center;
 }
 
 /* --- card sheet ------------------------------------------------------------ */
@@ -1345,6 +1509,12 @@
   }
   .arrival-card {
     animation: none;
+  }
+  .emote-bubble {
+    animation: emote-fade 2.9s linear both;
+  }
+  .emote-pick {
+    transition: none;
   }
 }
 

@@ -17,6 +17,7 @@ export type SoundName =
   | 'gameWin'
   | 'gameLose'
   | 'error'
+  | 'emote'
 
 // --- Persisted setting ---------------------------------------------------------
 
@@ -197,6 +198,11 @@ const RECIPES: Record<SoundName, (v: Voice) => void> = {
   error: (v) => {
     v.tone({ freq: 160, glide: 120, at: 0, dur: 0.12, gain: 0.22, attack: 0.004 })
     v.tone({ freq: 110, at: 0, dur: 0.1, type: 'triangle', gain: 0.1, attack: 0.004 })
+  },
+  // a soft "pop": a sine bubbling up a fifth with a breath of air, ~90 ms
+  emote: (v) => {
+    v.tone({ freq: 620, glide: 930, at: 0, dur: 0.09, gain: 0.14, attack: 0.004 })
+    v.noise({ at: 0, dur: 0.04, from: 1800, to: 3200, gain: 0.04 })
   },
 }
 

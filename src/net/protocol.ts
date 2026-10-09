@@ -3,11 +3,30 @@
 // Every message is a plain JSON object carrying `v` (protocol version) and
 // `type`. A peer that receives a message with a different `v` must not try to
 // interpret it: the host answers `error/version-mismatch` and closes, the guest
-// reports the mismatch and stops retrying.
+// reports the mismatch and stops retrying. A message of the right version but
+// an unknown `type` is ignored by both sides (never fatal), so additive
+// changes do not need a new version; this one still bumps it whenever a
+// feature must exist on both ends to work (v2: emotes), so that a stale
+// cached client gets the clear "reload both devices" error instead of a game
+// that silently lacks the feature.
 
 import type { Action, Difficulty, GameState } from '../shared/contract.ts'
 
-export const PROTOCOL_VERSION = 1
+/** v1: lobby, state, actions. v2: + emotes. */
+export const PROTOCOL_VERSION = 2
+
+/** Emote ids are short lower-case tokens (the UI owns the actual set). */
+const EMOTE_ID = /^[a-z0-9_-]{1,32}$/
+export function isEmoteIdShape(id: unknown): id is string {
+  return typeof id === 'string' && EMOTE_ID.test(id)
+}
+
+/** A player flashed an emote. `at` is the host's clock (ms since epoch). */
+export interface EmoteEvent {
+  seat: number
+  id: string
+  at: number
+}
 
 /** Who controls a seat. `local` and `ai` both live on the host's device. */
 export type SeatKind = 'local' | 'remote' | 'ai'
@@ -67,6 +86,8 @@ export type GuestMessage =
   | { v: number; type: 'ping' }
   /** Give the seat up for good (the token is forgotten by the host). */
   | { v: number; type: 'leave' }
+  /** Flash an emote over my seat. The host validates, stamps the seat and rebroadcasts. */
+  | { v: number; type: 'emote'; id: string }
 
 // ---- host -> guest ---------------------------------------------------------
 
@@ -86,14 +107,18 @@ export type HostMessage =
   | { v: number; type: 'state'; state: GameState | null; rev: number }
   | { v: number; type: 'error'; code: NetErrorCode; message: string }
   | { v: number; type: 'pong' }
+  /** Somebody (maybe you, maybe the host itself) flashed an emote. Broadcast to every guest. */
+  | { v: number; type: 'emote'; seat: number; id: string; at: number }
 
 export type ParseResult<T> =
   | { ok: true; msg: T }
   | { ok: false; reason: 'malformed' }
+  /** Right version, a `type` this build does not know: ignore it. */
+  | { ok: false; reason: 'unknown-type' }
   | { ok: false; reason: 'version'; theirs: number }
 
-const GUEST_TYPES = new Set(['hello', 'action', 'sync', 'ping', 'leave'])
-const HOST_TYPES = new Set(['welcome', 'lobby', 'state', 'error', 'pong'])
+const GUEST_TYPES = new Set(['hello', 'action', 'sync', 'ping', 'leave', 'emote'])
+const HOST_TYPES = new Set(['welcome', 'lobby', 'state', 'error', 'pong', 'emote'])
 
 function parse<T>(raw: unknown, types: Set<string>, check: (m: Record<string, unknown>) => boolean): ParseResult<T> {
   if (typeof raw !== 'object' || raw === null) return { ok: false, reason: 'malformed' }
@@ -102,7 +127,8 @@ function parse<T>(raw: unknown, types: Set<string>, check: (m: Record<string, un
   // The version is checked before anything else: an unknown version may have
   // message types and shapes we know nothing about.
   if (m.v !== PROTOCOL_VERSION) return { ok: false, reason: 'version', theirs: m.v }
-  if (typeof m.type !== 'string' || !types.has(m.type)) return { ok: false, reason: 'malformed' }
+  if (typeof m.type !== 'string') return { ok: false, reason: 'malformed' }
+  if (!types.has(m.type)) return { ok: false, reason: 'unknown-type' }
   if (!check(m)) return { ok: false, reason: 'malformed' }
   return { ok: true, msg: m as unknown as T }
 }
@@ -116,6 +142,8 @@ export function parseGuestMessage(raw: unknown): ParseResult<GuestMessage> {
         return typeof m.name === 'string' && (m.token === undefined || typeof m.token === 'string')
       case 'action':
         return isObj(m.action) && typeof m.rev === 'number'
+      case 'emote':
+        return isEmoteIdShape(m.id)
       default:
         return true
     }
@@ -139,6 +167,8 @@ export function parseHostMessage(raw: unknown): ParseResult<HostMessage> {
         return typeof m.rev === 'number' && (m.state === null || isObj(m.state))
       case 'error':
         return typeof m.code === 'string' && typeof m.message === 'string'
+      case 'emote':
+        return Number.isInteger(m.seat) && (m.seat as number) >= 0 && isEmoteIdShape(m.id) && typeof m.at === 'number'
       default:
         return true
     }
