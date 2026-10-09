@@ -6,6 +6,7 @@ import './index.css'
 import App from './App.tsx'
 import { applyThemeVars } from './ui/theme'
 import { installSoundUnlock } from './ui/logic/sound'
+import { installAnalytics } from './ui/logic/analytics'
 
 // PWA service worker (offline shell, auto update), web only: the same
 // registration vite-plugin-pwa would inject. The native app (Capacitor) ships
@@ -18,6 +19,7 @@ if (import.meta.env.PROD && !Capacitor.isNativePlatform() && 'serviceWorker' in 
 }
 
 applyThemeVars()
+installAnalytics()
 // Audio may only start from a tap: arm the context on the first gesture.
 installSoundUnlock()
 

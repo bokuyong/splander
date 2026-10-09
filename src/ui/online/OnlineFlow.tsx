@@ -2,6 +2,7 @@
 // the net session's snapshot. The room itself lives in roomStore (module
 // scope); this component only renders it.
 import { useEffect, useState, useSyncExternalStore } from 'react'
+import { track } from '../logic/analytics'
 import { ROOM_CODE_LENGTH, type HostSession, type SessionSnapshot } from '../../net'
 import { BackIcon, PeopleIcon } from '../components/Icons'
 import { Sheet } from '../components/Sheet'
@@ -70,11 +71,13 @@ function Menu({ error, onBack, onOpen }: { error: string | null; onBack: () => v
       onCreate={(name) => {
         savePrefs({ name })
         onOpen()
+        track('online-host')
         openHostRoom(name)
       }}
       onJoin={(name, roomCode) => {
         savePrefs({ name })
         onOpen()
+        track('online-join')
         openGuestRoom(roomCode, name)
       }}
       onRejoin={() => {

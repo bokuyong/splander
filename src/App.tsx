@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react'
 import type { NewGameConfig } from './shared/contract'
 import { chooseAction } from './ai'
 import { createLocalController, loadSavedGame } from './ui/controller'
+import { track } from './ui/logic/analytics'
 import type { GameController } from './ui/controller'
 import { GameScreen } from './ui/game/GameScreen'
 import { HomeScreen, HowToPage, LocalSetup, SoloSetup } from './ui/home/HomeScreens'
@@ -35,8 +36,10 @@ export default function App() {
   }, [])
 
   const play = (controller: GameController) => setScreen({ name: 'game', controller })
-  const startLocal = (players: NewGameConfig['players']) =>
+  const startLocal = (players: NewGameConfig['players']) => {
+    track(players.some((p) => p.kind === 'ai') ? 'start-solo' : 'start-local')
     play(createLocalController({ players, chooseAction }))
+  }
 
   let content
   switch (screen.name) {

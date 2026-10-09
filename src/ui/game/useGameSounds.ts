@@ -1,6 +1,7 @@
 // Turns consecutive game states into sound cues (and the tab-title alert).
 // The pure helpers decide what happened; the hook only plays it.
 import { useEffect, useRef } from 'react'
+import { track } from '../logic/analytics'
 import type { GameState } from '../../shared/contract'
 import type { ControllerSnapshot } from '../controller'
 import { diffEvents } from '../logic/describe'
@@ -52,6 +53,7 @@ export function soundCues(prev: GameState, next: GameState, mySeats: readonly nu
 /** What to play when the result screen appears. */
 export function resultSound(state: GameState, mySeats: readonly number[]): SoundName {
   const winners = state.winners ?? []
+  track('game-over')
   return mySeats.some((seat) => winners.includes(seat)) ? 'gameWin' : 'gameLose'
 }
 
