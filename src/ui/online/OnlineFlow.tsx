@@ -72,7 +72,9 @@ function Menu({ error, onBack, onOpen }: { error: string | null; onBack: () => v
         savePrefs({ name })
         onOpen()
         track('online-host')
-        openHostRoom(name)
+        const room = openHostRoom(name)
+        // the host's last turn-limit choice carries over to the new room
+        ;(room.session as HostSession).setTurnLimit(prefs.turnLimitSec)
       }}
       onJoin={(name, roomCode) => {
         savePrefs({ name })
@@ -223,6 +225,15 @@ function RoomView({
         onStart={host ? () => void room.startGame() : undefined}
         onAddSeat={host ? addSeat : undefined}
         onRemoveSeat={host ? (index) => void (room.session as HostSession).setSeat(index, null) : undefined}
+        turnLimitSec={snap.lobby?.turnLimitSec ?? null}
+        onTurnLimit={
+          host
+            ? (seconds) => {
+                savePrefs({ turnLimitSec: seconds })
+                ;(room.session as HostSession).setTurnLimit(seconds)
+              }
+            : undefined
+        }
         onRetry={isFatalError(snap.lastError) ? undefined : () => room.session.retry()}
         onLeave={() => {
           // Alone in the room there is nothing to lose: just leave.

@@ -20,6 +20,7 @@
 //   session.close({ forget? })
 //   // host only:
 //   session.setSeat(index, seatConfig | null) -> boolean
+//   session.setTurnLimit(seconds | null)      -> boolean   (lobby only)
 //   session.startGame(initialState)           -> boolean
 //   session.returnToLobby()
 //
@@ -36,9 +37,9 @@
 //   status     'connecting' | 'connected' | 'reconnecting' | 'disconnected'
 //   roomCode   string | null     5 chars to show/share; host: null until the
 //                                room is registered (status 'connected')
-//   lobby      Lobby | null      { roomCode, started, seats: LobbySeat[] }
+//   lobby      Lobby | null      { roomCode, started, turnLimitSec, seats }
 //                                LobbySeat = { kind: 'local'|'remote'|'ai',
-//                                  name, difficulty?, claimed, online }
+//                                  name, difficulty?, claimed, online, standIn }
 //                                seat index === player index in GameState.
 //                                'local' means "on the host's device".
 //                                guest: null until it has been let in
@@ -50,6 +51,24 @@
 //                                hot-seat may have several; guest: [mySeat])
 //   canAct     boolean           it is this device's turn and the link is up
 //   lastError  { code, message } | null
+//   timer      TurnTimer | null  { limitSec, seat, deadline } for the turn
+//                                being played; deadline is on this device's
+//                                Date.now() clock. null = nothing counting
+//   forced     'timeout' | 'offline' | null   the host, not the seat's owner,
+//                                played state.lastAction (see below)
+//
+// Turn limit and stand-ins (online games only; local games have none)
+// --------------------------------------------------------------------
+// The host picks lobby.turnLimitSec in the lobby (setTurnLimit; default 60,
+// null = no limit). When a human seat's time is up, the host plays a move
+// for it with chooseAiAction (normal difficulty) and broadcasts the state
+// with forced: 'timeout'. That applies to the host's own seat too. A guest
+// offline for 30 s during a game gets standIn: true in the lobby, and the
+// AI plays its turns at once (forced: 'offline') until it reconnects, when
+// control returns to it by itself. Both need chooseAiAction.
+// Clocks: the host sends how much time is LEFT in every state message and a
+// guest anchors that to its own clock on receipt, so clock skew between the
+// phones never matters (protocol.ts has the details).
 //
 // Typical host flow
 // -----------------
@@ -68,6 +87,7 @@
 //        s.setSeat(1, { kind: 'remote' })              // open seat for a guest
 //        s.setSeat(2, { kind: 'local', name: '지호' })  // append a 3rd seat
 //        s.setSeat(2, null)                            // remove it again
+//        s.setTurnLimit(30)                            // or null: no limit
 //   4. Build the game and start it:
 //        const players = lobbyToPlayers(snap.lobby)    // helper below
 //        s.startGame(engine.createGame({ players, seed, cards, nobles }))
@@ -212,10 +232,15 @@ export {
   PROTOCOL_VERSION,
   ROOM_CODE_LENGTH,
   ROOM_CODE_ALPHABET,
+  TURN_LIMIT_CHOICES,
+  DEFAULT_TURN_LIMIT_SEC,
+  STAND_IN_AFTER_MS,
   normalizeRoomCode,
   isValidRoomCode,
   isEmoteIdShape,
+  isTurnLimit,
   type EmoteEvent,
+  type ForcedReason,
   type Lobby,
   type LobbySeat,
   type SeatKind,
@@ -223,6 +248,7 @@ export {
   type NetErrorCode,
   type GuestMessage,
   type HostMessage,
+  type WireTimer,
 } from './protocol.ts'
 export { createMemoryNetwork, TransportError, type Transport, type Connection, type RoomListener } from './transport.ts'
 export { createMemoryStorage, type KeyValueStorage, type Lifecycle } from './util.ts'
@@ -234,4 +260,5 @@ export type {
   HostSession,
   GuestSession,
   SeatConfig,
+  TurnTimer,
 } from './types.ts'

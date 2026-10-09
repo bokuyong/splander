@@ -12,10 +12,12 @@ import type {
 } from '../shared/contract'
 import { CARDS, NOBLES } from '../data'
 import { engine as realEngine } from '../engine'
+import type { ForcedReason, TurnTimer } from '../net'
 import { aiReaction, aiSeats } from './logic/aiReactions'
 import { isEmoteId, type EmoteEvent } from './logic/emotes'
 
 export type { EmoteEvent } from './logic/emotes'
+export type { ForcedReason, TurnTimer } from '../net'
 
 export interface ControllerSnapshot {
   /**
@@ -30,6 +32,19 @@ export interface ControllerSnapshot {
   thinkingSeat: number | null
   /** Last problem, already in Korean and ready to show. */
   error: string | null
+  /**
+   * Online only: the countdown for the turn being played (deadline on this
+   * device's Date.now() clock). Undefined/null when nothing is counting.
+   */
+  timer?: TurnTimer | null
+  /**
+   * Online only: the last move was played by the host's AI for its seat's
+   * owner, because the clock ran out ('timeout') or the owner is away
+   * ('offline'). Null for ordinary moves.
+   */
+  forced?: ForcedReason | null
+  /** Online only: seats whose owner is away and has the AI standing in. */
+  standIns?: readonly number[]
 }
 
 export interface GameController {

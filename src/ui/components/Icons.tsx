@@ -192,6 +192,13 @@ export const BellIcon = (p: IconProps) => (
   </Icon>
 )
 
+export const ClockIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="13" r="8" fill="currentColor" fillOpacity="0.12" />
+    <path d="M12 9v4l2.5 2M9 3h6" />
+  </Icon>
+)
+
 export const SparkleIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2Z" fill="currentColor" fillOpacity="0.2" />

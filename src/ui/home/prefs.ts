@@ -6,10 +6,13 @@ export interface Prefs {
   difficulty: Difficulty
   aiCount: number
   localNames: string[]
+  /** Online turn limit the host picked last time (null = no limit). */
+  turnLimitSec: number | null
 }
 
 const KEY = 'moonlit-garden:prefs:v1'
-const DEFAULTS: Prefs = { name: '', difficulty: 'normal', aiCount: 1, localNames: ['', ''] }
+const DEFAULTS: Prefs = { name: '', difficulty: 'normal', aiCount: 1, localNames: ['', ''], turnLimitSec: 60 }
+const TURN_LIMITS = new Set<number | null>([null, 30, 60, 90])
 
 export function loadPrefs(): Prefs {
   try {
@@ -27,6 +30,10 @@ export function loadPrefs(): Prefs {
         Array.isArray(p.localNames) && p.localNames.every((n) => typeof n === 'string')
           ? p.localNames.slice(0, 4)
           : DEFAULTS.localNames,
+      turnLimitSec:
+        'turnLimitSec' in p && TURN_LIMITS.has(p.turnLimitSec as number | null)
+          ? (p.turnLimitSec as number | null)
+          : DEFAULTS.turnLimitSec,
     }
   } catch {
     return DEFAULTS

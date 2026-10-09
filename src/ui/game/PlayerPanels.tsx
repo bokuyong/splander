@@ -48,10 +48,22 @@ interface OpponentPanelProps {
   winner: boolean
   /** The emote this player is flashing right now, if any. */
   emote?: Bubble
+  /** Online: the player is away and the AI plays their turns for now. */
+  standIn?: boolean
   onOpen: () => void
 }
 
-export function OpponentPanel({ player, seat, active, thinking, highlight, winner, emote, onOpen }: OpponentPanelProps) {
+export function OpponentPanel({
+  player,
+  seat,
+  active,
+  thinking,
+  highlight,
+  winner,
+  emote,
+  standIn,
+  onOpen,
+}: OpponentPanelProps) {
   const score = engine.getScore(player)
   return (
     <button
@@ -68,7 +80,12 @@ export function OpponentPanel({ player, seat, active, thinking, highlight, winne
             {winner ? <CrownIcon className="is-gold" /> : player.kind === 'ai' ? <RobotIcon /> : <UserIcon />}
           </span>
           <span className="opp-name-text">{player.name}</span>
-          {thinking && (
+          {standIn && (
+            <span className="opp-badge" title={`${player.name} 대신 AI가 두는 중`}>
+              <RobotIcon /> 대신
+            </span>
+          )}
+          {thinking && !standIn && (
             <span className="dots" aria-label="생각 중">
               <i />
               <i />

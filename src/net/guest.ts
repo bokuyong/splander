@@ -8,13 +8,15 @@ import {
   normalizeRoomCode,
   parseHostMessage,
   type EmoteEvent,
+  type ForcedReason,
   type GuestMessage,
   type HostMessage,
   type Lobby,
   type NetErrorCode,
+  type WireTimer,
 } from './protocol.ts'
 import { transportErrorCode, type Connection, type Transport } from './transport.ts'
-import type { GuestSession, SessionSnapshot } from './types.ts'
+import type { GuestSession, SessionSnapshot, TurnTimer } from './types.ts'
 import {
   DEFAULT_RETRY_DELAYS_MS,
   browserLifecycle,
@@ -60,6 +62,8 @@ export interface GuestSessionOptions {
   /** How long the host may take to answer the probe sent when the page wakes. Default 3000. */
   wakeProbeMs?: number
   lifecycle?: Lifecycle
+  /** Test hook: this device's clock (the turn clock is anchored to it). */
+  now?: () => number
 }
 
 interface SavedGuest {
@@ -89,6 +93,7 @@ export function createGuestSession(opts: GuestSessionOptions): GuestSession {
   const retryDelays = opts.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS
   const heartbeatMs = opts.heartbeatMs ?? 5000
   const wakeProbeMs = opts.wakeProbeMs ?? 3000
+  const now = opts.now ?? Date.now
   const sleeper = createSleeper()
 
   let token: string | null = readJson<SavedGuest>(storage, storageKey)?.token ?? null
@@ -110,6 +115,8 @@ export function createGuestSession(opts: GuestSessionOptions): GuestSession {
   let state: GameState | null = null
   let rev = 0
   let mySeat: number | null = null
+  let timer: TurnTimer | null = null
+  let forced: ForcedReason | null = null
 
   const store = createStore<SessionSnapshot>({
     role: 'guest',
@@ -122,6 +129,8 @@ export function createGuestSession(opts: GuestSessionOptions): GuestSession {
     localSeats: Object.freeze([]),
     canAct: false,
     lastError: null,
+    timer: null,
+    forced: null,
   })
 
   function publish(patch: Partial<SessionSnapshot> = {}): void {
@@ -134,10 +143,27 @@ export function createGuestSession(opts: GuestSessionOptions): GuestSession {
       rev,
       mySeat,
       localSeats: sameLocals ? prevLocals : Object.freeze(mySeat === null ? [] : [mySeat]),
+      timer,
+      forced,
       ...patch,
       canAct:
         status === 'connected' && state !== null && state.phase !== 'gameOver' && state.currentPlayer === mySeat,
     })
+  }
+
+  /**
+   * Takes a state (+ clock) from the host. The host says how much time is
+   * LEFT at the moment of sending; anchoring that to this device's clock on
+   * receipt keeps the two clocks out of each other's way (see protocol.ts).
+   */
+  function takeState(next: GameState | null, nextRev: number, wire: WireTimer | null, why: ForcedReason | null): void {
+    state = next
+    rev = nextRev
+    forced = why
+    timer =
+      wire && next && next.phase !== 'gameOver'
+        ? Object.freeze({ limitSec: wire.limitSec, seat: next.currentPlayer, deadline: now() + wire.remainingMs })
+        : null
   }
 
   function send(msg: GuestMessage): void {
@@ -193,8 +219,7 @@ export function createGuestSession(opts: GuestSessionOptions): GuestSession {
         token = msg.token
         mySeat = msg.seat
         lobby = msg.lobby
-        state = msg.state
-        rev = msg.rev
+        takeState(msg.state, msg.rev, msg.timer ?? null, msg.forced ?? null)
         writeJson(storage, storageKey, { token, name: opts.name } satisfies SavedGuest)
         writeJson(storage, GUEST_LAST_ROOM_KEY, { roomCode, name: opts.name } satisfies SavedGuestRoomInfo)
         publish({ status: 'connected', lastError: null })
@@ -204,10 +229,10 @@ export function createGuestSession(opts: GuestSessionOptions): GuestSession {
         publish()
         return
       case 'state':
-        // Revisions only go up; an older one is a late duplicate.
+        // Revisions only go up; an older one is a late duplicate. The same
+        // revision again (a resync) is welcome: it carries a fresh clock.
         if (msg.rev < rev) return
-        state = msg.state
-        rev = msg.rev
+        takeState(msg.state, msg.rev, msg.timer ?? null, msg.forced ?? null)
         publish()
         return
       case 'error':

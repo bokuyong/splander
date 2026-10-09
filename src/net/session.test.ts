@@ -95,9 +95,10 @@ describe('room creation', () => {
     expect(snap.role).toBe('host')
     expect(snap.mySeat).toBe(0)
     expect(snap.lobby?.seats).toEqual([
-      { kind: 'local', name: 'Hana', claimed: true, online: true },
-      { kind: 'remote', name: '', claimed: false, online: false },
+      { kind: 'local', name: 'Hana', claimed: true, online: true, standIn: false },
+      { kind: 'remote', name: '', claimed: false, online: false, standIn: false },
     ])
+    expect(snap.lobby?.turnLimitSec).toBe(60)
   })
 
   it('picks another code when the first one is taken', async () => {
@@ -135,7 +136,7 @@ describe('join flow', () => {
     expect(g.localSeats).toEqual([1])
     expect(g.roomCode).toBe(code)
     expect(g.state).toBeNull()
-    expect(g.lobby?.seats[1]).toEqual({ kind: 'remote', name: 'Jiho', claimed: true, online: true })
+    expect(g.lobby?.seats[1]).toEqual({ kind: 'remote', name: 'Jiho', claimed: true, online: true, standIn: false })
     expect(g.lobby?.started).toBe(false)
     await until(() => host.getSnapshot().lobby?.seats[1].online === true, 'host sees guest')
     expect(host.getSnapshot().lobby).toEqual(g.lobby)
@@ -180,6 +181,7 @@ describe('join flow', () => {
       difficulty: 'hard',
       claimed: true,
       online: true,
+      standIn: false,
     })
     expect(host.setSeat(1, { kind: 'local', name: 'Mina' })).toBe(true)
     await until(() => guest.getSnapshot().status === 'disconnected', 'guest kicked')
@@ -819,6 +821,286 @@ describe('emotes', () => {
     expect(heard).toEqual([])
     host.close()
     expect(host.sendEmote('clap')).toBe(false)
+  })
+})
+
+describe('turn timer', () => {
+  const stateMessages = (net: MemoryNetwork) =>
+    net.sent.filter((m): m is HostMessage & { type: 'state' } => (m as HostMessage).type === 'state')
+
+  /** Host + guest on a fake clock; the host's AI passes when asked. */
+  async function timedPair(limitSec: number | null, extra: Partial<HostSessionOptions> = {}) {
+    const clock = { t: 1_000_000 }
+    const aiCalls: number[] = []
+    const room = await pair({
+      now: () => clock.t,
+      tickMs: 5,
+      chooseAiAction: (state) => {
+        aiCalls.push(state.currentPlayer)
+        return { type: 'pass' }
+      },
+      ...extra,
+    })
+    expect(room.host.setTurnLimit(limitSec)).toBe(true)
+    await until(() => room.guest.getSnapshot().lobby?.turnLimitSec === limitSec, 'guest sees the limit')
+    return { ...room, clock, aiCalls }
+  }
+
+  it('lets the host choose a limit in the lobby, and guests see it', async () => {
+    const { host, guest } = await pair()
+    expect(host.getSnapshot().lobby?.turnLimitSec).toBe(60) // the default
+    expect(guest.getSnapshot().lobby?.turnLimitSec).toBe(60)
+    expect(host.setTurnLimit(90)).toBe(true)
+    await until(() => guest.getSnapshot().lobby?.turnLimitSec === 90, 'guest sees 90')
+    expect(host.setTurnLimit(null)).toBe(true)
+    await until(() => guest.getSnapshot().lobby?.turnLimitSec === null, 'guest sees no limit')
+    // Nonsense is refused, and the limit is a lobby decision.
+    expect(host.setTurnLimit(-5)).toBe(false)
+    expect(host.getSnapshot().lastError?.code).toBe('bad-lobby')
+    expect(host.setTurnLimit(2.5)).toBe(false)
+    expect(host.setTurnLimit(30)).toBe(true)
+    host.startGame(fakeState())
+    expect(host.setTurnLimit(60)).toBe(false)
+    expect(host.getSnapshot().lobby?.turnLimitSec).toBe(30)
+  })
+
+  it('sends the clock with every state and the guest anchors it to its own clock', async () => {
+    const { net, host, guest, code, clock } = await timedPair(30)
+    net.sent.length = 0
+    host.startGame(fakeState())
+    await until(() => guest.getSnapshot().state !== null, 'guest got state')
+    const sent = stateMessages(net)
+    expect(sent.length).toBeGreaterThan(0)
+    expect(sent[0].timer).toEqual({ limitSec: 30, remainingMs: 30_000 })
+    expect(sent[0].forced).toBeNull()
+    // Host: the deadline is on its own clock.
+    expect(host.getSnapshot().timer).toEqual({ limitSec: 30, seat: 0, deadline: clock.t + 30_000 })
+    // Guest: the host's "time left" is anchored to the guest's clock (Date.now here).
+    const g = guest.getSnapshot().timer
+    expect(g?.limitSec).toBe(30)
+    expect(g?.seat).toBe(0)
+    expect(g?.deadline).toBeGreaterThan(Date.now() + 29_000)
+    expect(g?.deadline).toBeLessThanOrEqual(Date.now() + 30_000)
+    // The snapshot's clock is stable while the turn lasts...
+    const before = guest.getSnapshot().timer
+    await settle(30)
+    expect(guest.getSnapshot().timer).toBe(before)
+    // ...and a resync later in the turn (here: a reconnect) carries only what is left.
+    clock.t += 12_000
+    net.sent.length = 0
+    net.dropConnections(code)
+    await until(() => guest.getSnapshot().status === 'connected' && guest.getSnapshot().timer !== before, 'guest resynced')
+    const welcome = net.sent.find((m) => (m as HostMessage).type === 'welcome') as { timer: unknown } | undefined
+    expect(welcome?.timer).toEqual({ limitSec: 30, remainingMs: 18_000 })
+    expect(guest.getSnapshot().timer?.deadline).toBeLessThanOrEqual(Date.now() + 18_000)
+  })
+
+  it('plays a move for a guest whose time ran out, then for the host itself', async () => {
+    const { host, guest, clock, aiCalls } = await timedPair(30)
+    host.startGame(fakeState())
+    host.sendAction({ type: 'pass' }) // the guest is to move
+    await until(() => guest.getSnapshot().canAct, 'guest to move')
+    const turnBefore = hostState(host).turn
+
+    clock.t += 29_999
+    await settle(40)
+    expect(hostState(host).currentPlayer).toBe(1)
+    expect(aiCalls).toEqual([])
+
+    clock.t += 1
+    await until(() => hostState(host).currentPlayer === 0, 'the host played for the guest')
+    expect(aiCalls).toEqual([1])
+    expect(hostState(host).turn).toBe(turnBefore + 1)
+    expect(hostState(host).lastAction).toEqual({ player: 1, action: { type: 'pass' } })
+    expect(host.getSnapshot().forced).toBe('timeout')
+    await until(() => guest.getSnapshot().state?.currentPlayer === 0, 'guest sees it')
+    expect(guest.getSnapshot().forced).toBe('timeout')
+    expect(guest.getSnapshot().lastError).toBeNull()
+
+    // The clock restarted for the host's own seat: it is not spared either.
+    expect(host.getSnapshot().timer?.deadline).toBe(clock.t + 30_000)
+    clock.t += 29_000
+    await settle(40)
+    expect(hostState(host).currentPlayer).toBe(0)
+    clock.t += 1_000
+    await until(() => hostState(host).currentPlayer === 1, 'the host was played for too')
+    expect(aiCalls).toEqual([1, 0])
+    expect(host.getSnapshot().forced).toBe('timeout')
+
+    // An ordinary move clears the flag again.
+    guest.sendAction({ type: 'pass' })
+    await until(() => hostState(host).currentPlayer === 0, 'guest moved')
+    expect(host.getSnapshot().forced).toBeNull()
+    await until(() => guest.getSnapshot().forced === null, 'guest sees an ordinary move')
+  })
+
+  it('counts decision phases as turns of their own', async () => {
+    // The fake engine has no discard phase, so hand the host a state that is
+    // already in one: the clock must run for the deciding seat.
+    const { host, clock, aiCalls } = await timedPair(30, {
+      chooseAiAction: (state) => {
+        aiCalls.push(state.currentPlayer)
+        return { type: 'chooseNoble', nobleId: 'end' }
+      },
+    })
+    host.setTurnLimit(30)
+    host.startGame({ ...fakeState(), currentPlayer: 1, phase: 'chooseNoble' })
+    expect(host.getSnapshot().timer).toEqual({ limitSec: 30, seat: 1, deadline: clock.t + 30_000 })
+    clock.t += 30_000
+    await until(() => hostState(host).phase === 'gameOver', 'the host decided for the guest')
+    expect(hostState(host).winners).toEqual([1])
+    expect(host.getSnapshot().forced).toBe('timeout')
+  })
+
+  it('never expires without a limit', async () => {
+    const { net, host, guest, clock, aiCalls } = await timedPair(null)
+    net.sent.length = 0
+    host.startGame(fakeState())
+    host.sendAction({ type: 'pass' })
+    await until(() => guest.getSnapshot().canAct, 'guest to move')
+    expect(host.getSnapshot().timer).toBeNull()
+    expect(guest.getSnapshot().timer).toBeNull()
+    expect(stateMessages(net).every((m) => m.timer === null)).toBe(true)
+    clock.t += 60 * 60 * 1000
+    await settle(40)
+    expect(hostState(host).currentPlayer).toBe(1)
+    expect(aiCalls).toEqual([])
+    expect(guest.getSnapshot().canAct).toBe(true)
+  })
+
+  it('stops at the end of the game and in the lobby', async () => {
+    const { host, guest, clock, aiCalls } = await timedPair(30)
+    host.startGame(fakeState())
+    host.sendAction({ type: 'chooseNoble', nobleId: 'end' })
+    expect(hostState(host).phase).toBe('gameOver')
+    expect(host.getSnapshot().timer).toBeNull()
+    await until(() => guest.getSnapshot().state?.phase === 'gameOver', 'guest sees the end')
+    expect(guest.getSnapshot().timer).toBeNull()
+    const end = hostState(host)
+    clock.t += 100_000
+    await settle(40)
+    expect(hostState(host)).toBe(end)
+    expect(aiCalls).toEqual([])
+
+    host.returnToLobby()
+    expect(host.getSnapshot().timer).toBeNull()
+    clock.t += 100_000
+    await settle(40)
+    expect(aiCalls).toEqual([])
+    expect(host.getSnapshot().state).toBeNull()
+
+    // A new game starts a fresh clock.
+    host.startGame(fakeState())
+    expect(host.getSnapshot().timer?.deadline).toBe(clock.t + 30_000)
+  })
+
+  it('shows no clock on an AI seat’s turn', async () => {
+    const { host, clock } = await timedPair(30)
+    host.setSeat(1, { kind: 'ai', name: 'Bunny' })
+    host.startGame(fakeState())
+    expect(host.getSnapshot().timer?.seat).toBe(0)
+    host.sendAction({ type: 'pass' })
+    expect(host.getSnapshot().timer).toBeNull() // Bunny is to move
+    await until(() => hostState(host).currentPlayer === 0, 'AI moved')
+    expect(host.getSnapshot().forced).toBeNull() // an AI seat's own move is not "forced"
+    expect(host.getSnapshot().timer?.deadline).toBe(clock.t + 30_000)
+  })
+})
+
+describe('stand-ins', () => {
+  async function timedPair(limitSec: number | null) {
+    const clock = { t: 1_000_000 }
+    const aiCalls: number[] = []
+    const room = await pair({
+      now: () => clock.t,
+      tickMs: 5,
+      chooseAiAction: (state) => {
+        aiCalls.push(state.currentPlayer)
+        return { type: 'pass' }
+      },
+    })
+    room.host.setTurnLimit(limitSec)
+    await until(() => room.guest.getSnapshot().lobby?.turnLimitSec === limitSec, 'guest sees the limit')
+    return { ...room, clock, aiCalls }
+  }
+
+  it('has the AI play for a guest gone 30 s, and hands control back on return', async () => {
+    const { net, host, guest, code, clock, aiCalls } = await timedPair(null)
+    host.startGame(fakeState())
+    host.sendAction({ type: 'pass' })
+    await until(() => guest.getSnapshot().canAct, 'guest to move')
+
+    net.offline = true
+    net.dropConnections(code)
+    await until(() => host.getSnapshot().lobby?.seats[1].online === false, 'host sees guest offline')
+    expect(host.getSnapshot().lobby?.seats[1].standIn).toBe(false)
+
+    clock.t += 29_999
+    await settle(40)
+    expect(host.getSnapshot().lobby?.seats[1].standIn).toBe(false)
+    expect(hostState(host).currentPlayer).toBe(1) // still waiting
+    expect(aiCalls).toEqual([])
+
+    clock.t += 1
+    await until(() => host.getSnapshot().lobby?.seats[1].standIn === true, 'stand-in flagged')
+    await until(() => hostState(host).currentPlayer === 0, 'the AI played for the guest')
+    expect(aiCalls).toEqual([1])
+    expect(host.getSnapshot().forced).toBe('offline')
+    expect(host.getSnapshot().lobby?.seats[1]).toMatchObject({ online: false, standIn: true })
+
+    // ...and keeps doing so on every later turn while the guest is away.
+    host.sendAction({ type: 'pass' })
+    await until(() => hostState(host).currentPlayer === 0, 'the AI played again')
+    expect(aiCalls).toEqual([1, 1])
+    expect(host.getSnapshot().forced).toBe('offline')
+
+    // The guest comes back: the flag drops and the seat is theirs again.
+    net.offline = false
+    await until(() => guest.getSnapshot().status === 'connected', 'guest back')
+    await until(() => host.getSnapshot().lobby?.seats[1].standIn === false, 'stand-in released')
+    expect(guest.getSnapshot().lobby?.seats[1]).toMatchObject({ online: true, standIn: false })
+    expect(guest.getSnapshot().forced).toBe('offline') // the last move really was the AI's
+    host.sendAction({ type: 'pass' })
+    await until(() => guest.getSnapshot().canAct, 'guest to move')
+    clock.t += 5 * 60_000 // no limit, no stand-in: the game waits for them
+    await settle(40)
+    expect(hostState(host).currentPlayer).toBe(1)
+    expect(aiCalls).toEqual([1, 1])
+    guest.sendAction({ type: 'pass' })
+    await until(() => hostState(host).currentPlayer === 0, 'the guest plays again')
+    expect(host.getSnapshot().forced).toBeNull()
+  })
+
+  it('does not wait for the turn limit once the guest is a stand-in', async () => {
+    const { net, host, guest, code, clock, aiCalls } = await timedPair(90)
+    host.startGame(fakeState())
+    net.offline = true
+    net.dropConnections(code)
+    await until(() => host.getSnapshot().lobby?.seats[1].online === false, 'host sees guest offline')
+    clock.t += 30_000
+    await until(() => host.getSnapshot().lobby?.seats[1].standIn === true, 'stand-in flagged while host is to move')
+    expect(hostState(host).currentPlayer).toBe(0) // the host's own turn is untouched
+    expect(aiCalls).toEqual([])
+    host.sendAction({ type: 'pass' })
+    await until(() => hostState(host).currentPlayer === 0, 'the AI played for the guest at once')
+    expect(aiCalls).toEqual([1])
+    expect(host.getSnapshot().forced).toBe('offline')
+    expect(host.getSnapshot().lobby?.seats[1].standIn).toBe(true)
+    net.offline = false
+    await until(() => guest.getSnapshot().status === 'connected', 'guest back')
+    await until(() => guest.getSnapshot().lobby?.seats[1].standIn === false, 'guest sees itself in control')
+  })
+
+  it('clears the flag when the game ends', async () => {
+    const { net, host, code, clock } = await timedPair(null)
+    host.startGame(fakeState())
+    net.offline = true
+    net.dropConnections(code)
+    await until(() => host.getSnapshot().lobby?.seats[1].online === false, 'host sees guest offline')
+    clock.t += 30_000
+    await until(() => host.getSnapshot().lobby?.seats[1].standIn === true, 'stand-in flagged')
+    host.sendAction({ type: 'chooseNoble', nobleId: 'end' })
+    expect(host.getSnapshot().lobby?.seats[1].standIn).toBe(false)
   })
 })
 

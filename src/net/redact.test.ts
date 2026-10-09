@@ -83,10 +83,11 @@ describe('lobbyToPlayers', () => {
       lobbyToPlayers({
         roomCode: 'ABC23',
         started: false,
+        turnLimitSec: 60,
         seats: [
-          { kind: 'local', name: 'Hana', claimed: true, online: true },
-          { kind: 'remote', name: 'Jiho', claimed: true, online: false },
-          { kind: 'ai', name: 'Bunny', difficulty: 'hard', claimed: true, online: true },
+          { kind: 'local', name: 'Hana', claimed: true, online: true, standIn: false },
+          { kind: 'remote', name: 'Jiho', claimed: true, online: false, standIn: true },
+          { kind: 'ai', name: 'Bunny', difficulty: 'hard', claimed: true, online: true, standIn: false },
         ],
       }),
     ).toEqual([

@@ -102,16 +102,23 @@ function createRoom(
     const thinkingSeat = waitingOnOther ? current : null
     const error =
       localError ?? (s.lastError && !isConnectionError(s.lastError) ? netErrorText(s.lastError) : null)
+    const timer = s.state !== null ? s.timer : null
+    const forced = s.state !== null ? s.forced : null
+    const standInList = (s.lobby?.seats ?? []).flatMap((ls, i) => (ls.standIn ? [i] : []))
+    const standIns = snapshot?.standIns && sameSeats(snapshot.standIns, standInList) ? snapshot.standIns : standInList
     if (
       snapshot &&
       snapshot.state === state &&
       snapshot.mySeats === mySeats &&
       snapshot.thinkingSeat === thinkingSeat &&
-      snapshot.error === error
+      snapshot.error === error &&
+      snapshot.timer === timer &&
+      snapshot.forced === forced &&
+      snapshot.standIns === standIns
     ) {
       return
     }
-    snapshot = { state, mySeats, thinkingSeat, error }
+    snapshot = { state, mySeats, thinkingSeat, error, timer, forced, standIns }
     for (const listener of [...listeners]) listener()
   }
 
@@ -222,7 +229,18 @@ function createRoom(
 export interface HostRoomOptions
   extends OnlineDeps,
     Partial<
-      Pick<HostSessionOptions, 'transport' | 'storage' | 'aiDelayMs' | 'heartbeatMs' | 'retryDelaysMs' | 'lifecycle' | 'now'>
+      Pick<
+        HostSessionOptions,
+        | 'transport'
+        | 'storage'
+        | 'aiDelayMs'
+        | 'heartbeatMs'
+        | 'retryDelaysMs'
+        | 'lifecycle'
+        | 'now'
+        | 'standInAfterMs'
+        | 'tickMs'
+      >
     > {
   name?: string
   /** Re-open the room saved on this device instead of creating a new one. */

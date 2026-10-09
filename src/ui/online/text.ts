@@ -68,11 +68,16 @@ export function connectionNotice(snap: SessionSnapshot): ConnectionNotice | null
   if (snap.role === 'guest') {
     if (snap.status !== 'connected') return { tone: 'warn', text: '방 주인과 다시 연결하는 중…' }
   }
-  const away = (snap.lobby?.seats ?? [])
-    .filter((seat, i) => seat.kind === 'remote' && seat.claimed && !seat.online && i !== snap.mySeat)
-    .map((seat) => seat.name)
+  const gone = (snap.lobby?.seats ?? []).filter(
+    (seat, i) => seat.kind === 'remote' && seat.claimed && !seat.online && i !== snap.mySeat,
+  )
+  const away = gone.filter((seat) => !seat.standIn).map((seat) => seat.name)
+  const standIns = gone.filter((seat) => seat.standIn).map((seat) => seat.name)
   if (away.length > 0) {
     return { tone: 'warn', text: `${away.join(', ')} 연결이 끊겼어요 · 돌아오길 기다려요` }
+  }
+  if (standIns.length > 0) {
+    return { tone: 'warn', text: `${standIns.join(', ')} 대신 AI가 두는 중 · 돌아오면 바로 넘겨요` }
   }
   if (snap.role === 'host' && snap.status !== 'connected') {
     return {

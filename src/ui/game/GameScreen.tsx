@@ -31,6 +31,7 @@ import { DiscardModal, GuestChoiceModal, GuestSheet, LogSheet, PlayerSheet } fro
 import { GameOverScreen, GuestArrival, HandoffScreen } from './Overlays'
 import { MyArea, OpponentPanel } from './PlayerPanels'
 import { Bank, Board, GuestsRow } from './Table'
+import { TurnClock } from './TurnClock'
 import { useGameFeed } from './useGameFeed'
 import type { GameFeed } from './useGameFeed'
 import { resultSound, useGameSounds } from './useGameSounds'
@@ -45,7 +46,7 @@ interface GameScreenProps {
 export function GameScreen({ controller, onExit }: GameScreenProps) {
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
   const layer = useRef<HTMLDivElement>(null)
-  const feed = useGameFeed(snap.state, layer)
+  const feed = useGameFeed(snap.state, layer, snap.forced ?? null)
   return (
     <>
       {/* keyed by epoch: a rematch starts with fresh local UI state */}
@@ -79,6 +80,9 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
   const current = state.currentPlayer
   const over = state.phase === 'gameOver'
   const hotseat = mySeats.length > 1
+  // online only: the clock for the turn being played, and seats the AI covers
+  const timer = !over && snap.timer && snap.timer.seat === current ? snap.timer : null
+  const standIns = snap.standIns ?? []
   useGameSounds(snap, hotseat)
   const muted = useSoundMuted()
   const bubbles = useEmotes(controller, mySeats)
@@ -228,13 +232,14 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
         <div className={`turn-pill${myTurn ? ' is-me' : ''}`} key={`${current}-${myTurn}`} aria-live="polite">
           <span className="turn-dot" aria-hidden="true" />
           <span className="turn-text">{turnLabel}</span>
-          {!over && thinkingSeat === current && (
+          {!over && thinkingSeat === current && !timer && (
             <span className="dots" aria-label="생각 중">
               <i />
               <i />
               <i />
             </span>
           )}
+          {timer && <TurnClock timer={timer} mine={mySeats.includes(current)} />}
         </div>
         <div className={`goal${state.finalRound && !over ? ' is-final' : ''}`}>
           {state.finalRound && !over ? (
@@ -260,6 +265,7 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
             highlight={hitSeat === seat}
             winner={over && (state.winners?.includes(seat) ?? false)}
             emote={bubbles[seat]}
+            standIn={!over && standIns.includes(seat)}
             onOpen={() => setOpen({ kind: 'player', seat })}
           />
         ))}
@@ -323,10 +329,11 @@ function GameTable({ controller, snap, feed, onExit }: GameTableProps) {
         ) : (
           <button
             type="button"
-            className={`logline${feed.fresh ? ' is-fresh' : ''}`}
+            className={`logline${feed.fresh ? ' is-fresh' : ''}${lastEntry?.note ? ' is-forced' : ''}`}
             key={lastEntry?.id ?? 'none'}
             onClick={() => setOpen({ kind: 'log' })}
           >
+            {lastEntry?.note && <span className="logline-note">{lastEntry.note} · </span>}
             {lastEntry
               ? lastEntry.text
               : myTurn

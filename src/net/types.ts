@@ -1,7 +1,20 @@
 // Public types of the session facade (see index.ts for the walkthrough).
 
 import type { Action, Difficulty, GameState } from '../shared/contract.ts'
-import type { EmoteEvent, Lobby, NetError } from './protocol.ts'
+import type { EmoteEvent, ForcedReason, Lobby, NetError } from './protocol.ts'
+
+/**
+ * The turn clock, as this device should draw it. `deadline` is on THIS
+ * device's Date.now() clock (the host anchors it to its own clock, a guest to
+ * the moment the state arrived), so `deadline - Date.now()` is what is left.
+ */
+export interface TurnTimer {
+  /** Seconds per turn, as chosen in the lobby. */
+  readonly limitSec: number
+  /** The seat the clock is running for (= state.currentPlayer). */
+  readonly seat: number
+  readonly deadline: number
+}
 
 /**
  * connecting   : first attempt to create / join the room is in flight
@@ -37,6 +50,17 @@ export interface SessionSnapshot {
   readonly canAct: boolean
   /** The most recent problem; cleared by clearError() or the next sendAction. */
   readonly lastError: NetError | null
+  /**
+   * Countdown for the current turn. Null without a limit, in the lobby, after
+   * the game and while an AI seat is to move. Stable while the turn lasts.
+   */
+  readonly timer: TurnTimer | null
+  /**
+   * Set when the host, not the seat's owner, played `state.lastAction`:
+   * 'timeout' = the clock ran out, 'offline' = the owner is away and the AI
+   * stands in. Null for every ordinary move. Travels with `state`.
+   */
+  readonly forced: ForcedReason | null
 }
 
 export interface Session {
@@ -94,6 +118,12 @@ export interface HostSession extends Session {
   startGame(initialState: GameState): boolean
   /** Drops the game and goes back to the lobby (seats are kept). */
   returnToLobby(): void
+  /**
+   * Lobby only. Seconds each player gets per turn (10..600), or null for no
+   * limit. When it runs out the host plays a move for that seat with the
+   * AI (chooseAiAction), whether the seat is a guest's or the host's own.
+   */
+  setTurnLimit(seconds: number | null): boolean
 }
 
 export type GuestSession = Session

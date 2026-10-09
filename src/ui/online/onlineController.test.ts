@@ -294,6 +294,49 @@ describe('online rooms', () => {
   }, 30000)
 })
 
+describe('online turn timer', () => {
+  it('exposes the clock, plays a legal move when it runs out, and flags the stand-in', async () => {
+    const clock = { t: 5_000_000 }
+    const { net, h, g, code } = await seated({ now: () => clock.t, tickMs: 5 })
+    const session = h.session as HostSession
+    expect(session.setTurnLimit(30)).toBe(true)
+    expect(h.startGame()).toBe(true)
+    await until(() => g.hasGame(), 'the game to reach the guest')
+    await until(() => g.getSnapshot().timer?.limitSec === 30, 'guest sees the clock')
+    expect(h.getSnapshot().timer).toEqual({ limitSec: 30, seat: 0, deadline: clock.t + 30_000 })
+    expect(h.getSnapshot().forced).toBeNull()
+    expect(h.getSnapshot().standIns).toEqual([])
+
+    // The host dawdles: the real AI plays a legal move for seat 0.
+    const before = h.getSnapshot().state
+    clock.t += 30_000
+    await until(() => h.getSnapshot().state.currentPlayer === 1, 'the host was played for')
+    const after = h.getSnapshot().state
+    expect(after.lastAction?.player).toBe(0)
+    expect(engine.isLegal(before, after.lastAction!.action)).toBe(true)
+    expect(h.getSnapshot().forced).toBe('timeout')
+    expect(h.getSnapshot().error).toBeNull()
+    await until(() => g.getSnapshot().state.turn === after.turn, 'guest in sync')
+    expect(g.getSnapshot().forced).toBe('timeout')
+    expect(g.getSnapshot().timer?.seat).toBe(1)
+
+    // The guest vanishes for half a minute: the AI stands in, the screens know.
+    net.offline = true
+    net.dropConnections(code)
+    await until(() => h.session.getSnapshot().lobby?.seats[1].online === false, 'host notices')
+    clock.t += 30_000
+    await until(() => h.getSnapshot().standIns?.length === 1, 'stand-in flagged')
+    expect(h.getSnapshot().standIns).toEqual([1])
+    expect(connectionNotice(h.session.getSnapshot())?.text).toBe('지호 대신 AI가 두는 중 · 돌아오면 바로 넘겨요')
+    await until(() => h.getSnapshot().state.currentPlayer === 0, 'the AI played for the guest')
+    expect(h.getSnapshot().forced).toBe('offline')
+    net.offline = false
+    await until(() => g.session.getSnapshot().status === 'connected', 'guest back')
+    await until(() => h.getSnapshot().standIns?.length === 0, 'control handed back')
+    expect(connectionNotice(h.session.getSnapshot())).toBeNull()
+  })
+})
+
 describe('online emotes', () => {
   it('carries emotes between the rooms, tagged with the sender’s seat', async () => {
     let clock = 1_000_000

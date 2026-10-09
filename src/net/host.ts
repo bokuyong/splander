@@ -1,23 +1,46 @@
 // Host side: owns the room, the lobby and the authoritative GameState.
+//
+// Turn timer and stand-ins (so a game is never stuck on someone who left)
+// ------------------------------------------------------------------------
+// - `turnStartedAt` is reset on every state change (every applied action
+//   hands the move to someone, or changes the phase for the same seat, e.g.
+//   'discard' / 'chooseNoble'). With a turn limit, a ticker (tickMs) checks
+//   `now() - turnStartedAt` and, once the limit is up, plays a move for the
+//   seat with `chooseAiAction` (normal difficulty), whoever owns the seat: a
+//   guest or the host's own local seat. The result is broadcast with
+//   `forced: 'timeout'` so every screen can say so.
+// - A remote seat offline for STAND_IN_AFTER_MS during a game is flagged
+//   `standIn` (lobby broadcast). While flagged, its turns are played by the AI
+//   right away (after aiDelayMs, like an AI seat) with `forced: 'offline'`.
+//   The flag clears the moment the guest says hello again; a move already
+//   being chosen still lands (it is legal either way). Stand-ins do not
+//   depend on the turn limit: a walked-away player blocks nobody.
+// - Nothing ticks in the lobby or after the game: the ticker only runs while
+//   a game is on, and every check re-reads the state first.
 
 import type { Action, Difficulty, GameState } from '../shared/contract.ts'
 import {
+  DEFAULT_TURN_LIMIT_SEC,
   PROTOCOL_VERSION,
+  STAND_IN_AFTER_MS,
   generateRoomCode,
   isEmoteIdShape,
+  isTurnLimit,
   isValidRoomCode,
   parseGuestMessage,
   type EmoteEvent,
+  type ForcedReason,
   type HostMessage,
   type Lobby,
   type LobbySeat,
   type NetError,
   type NetErrorCode,
   type SeatKind,
+  type WireTimer,
 } from './protocol.ts'
 import { redactStateFor } from './redact.ts'
 import { transportErrorCode, type Connection, type RoomListener, type Transport } from './transport.ts'
-import type { HostSession, SessionSnapshot } from './types.ts'
+import type { HostSession, SessionSnapshot, TurnTimer } from './types.ts'
 import {
   DEFAULT_RETRY_DELAYS_MS,
   browserLifecycle,
@@ -57,7 +80,8 @@ export interface HostSessionOptions {
   /**
    * Chooses for state.currentPlayer (same signature as the contract's
    * ChooseAction; may also return a promise). It receives the state redacted
-   * for the AI's seat, so it cannot peek. Without it AI seats never move.
+   * for the AI's seat, so it cannot peek. Without it AI seats never move, and
+   * neither the turn limit nor stand-ins can play for anyone.
    */
   chooseAiAction?: (state: GameState, difficulty: Difficulty) => Action | Promise<Action>
   /** Pause before each AI move, so humans can follow. Default 900. */
@@ -79,6 +103,10 @@ export interface HostSessionOptions {
   retryDelaysMs?: readonly number[]
   /** A guest silent for 3 heartbeats is treated as offline. 0 disables. Default 5000. */
   heartbeatMs?: number
+  /** A guest offline this long during a game gets a stand-in. Default STAND_IN_AFTER_MS. */
+  standInAfterMs?: number
+  /** How often the turn clock and stand-ins are checked while a game is on. Default 500. */
+  tickMs?: number
   lifecycle?: Lifecycle
   /** Test hooks. */
   random?: () => number
@@ -96,6 +124,10 @@ interface SeatRec {
   lastSeen: number
   /** When this seat last flashed an emote (rate limiting). */
   lastEmoteAt: number
+  /** remote seats: `now()` when the connection was last lost (0 = never had one). */
+  offlineSince: number
+  /** remote seats: the AI is playing for the absent guest. */
+  standIn: boolean
 }
 
 interface SavedSeat {
@@ -113,6 +145,8 @@ interface SavedHostRoom {
   state: GameState | null
   rev: number
   savedAt: number
+  /** Missing in rooms saved by older builds: no limit then. */
+  turnLimitSec?: number | null
 }
 
 /** What the UI needs to offer "resume my room" after a reload. */
@@ -153,12 +187,18 @@ function cleanName(name: string, fallback: string): string {
   return trimmed || fallback
 }
 
+function newSeat(kind: SeatKind, name: string): SeatRec {
+  return { kind, name, token: null, conn: null, lastSeen: 0, lastEmoteAt: 0, offlineSince: 0, standIn: false }
+}
+
 export function createHostSession(opts: HostSessionOptions): HostSession {
   const { transport, applyAction } = opts
   const storage = opts.storage ?? defaultStorage()
   const aiDelayMs = opts.aiDelayMs ?? 900
   const retryDelays = opts.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS
   const heartbeatMs = opts.heartbeatMs ?? 5000
+  const standInAfterMs = opts.standInAfterMs ?? STAND_IN_AFTER_MS
+  const tickMs = opts.tickMs ?? 500
   const newToken = opts.generateToken ?? defaultGenerateToken
   const random = opts.random ?? Math.random
   const now = opts.now ?? Date.now
@@ -173,21 +213,25 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
   let rev = 0
   let roomCode: string
   let resumed = false
+  let turnLimitSec: number | null = DEFAULT_TURN_LIMIT_SEC
+  /** `now()` when the current turn (or decision phase) began. */
+  let turnStartedAt = now()
+  /** Who really played state.lastAction, when it was not the seat's owner. */
+  let forced: ForcedReason | null = null
 
   const saved = opts.resume ? loadSavedRoom(storage) : null
   if (saved) {
     resumed = true
     roomCode = saved.roomCode
-    seats = saved.seats.map((s) => ({ ...s, conn: null, lastSeen: 0, lastEmoteAt: 0 }))
+    // Guests are all "just gone" until they come back; stand-ins start counting now.
+    seats = saved.seats.map((s) => ({ ...newSeat(s.kind, s.name), difficulty: s.difficulty, token: s.token, offlineSince: now() }))
     started = saved.started && saved.state !== null
     state = started ? saved.state : null
     rev = saved.rev
+    turnLimitSec = isTurnLimit(saved.turnLimitSec) ? saved.turnLimitSec : null
   } else {
     roomCode = generateRoomCode(random)
-    seats = [
-      { kind: 'local', name: cleanName(opts.hostName ?? '', '방장'), token: null, conn: null, lastSeen: 0, lastEmoteAt: 0 },
-      { kind: 'remote', name: '', token: null, conn: null, lastSeen: 0, lastEmoteAt: 0 },
-    ]
+    seats = [newSeat('local', cleanName(opts.hostName ?? '', '방장')), newSeat('remote', '')]
   }
 
   // ---- runtime ----
@@ -196,8 +240,14 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
   let everRegistered = false
   let opening = false
   let listener: RoomListener | null = null
-  let aiTimer: ReturnType<typeof setTimeout> | null = null
+  /** One pending automatic move (AI seat, stand-in or timeout). */
+  let autoTimer: ReturnType<typeof setTimeout> | null = null
+  /** An automatic move is being chosen right now (chooseAiAction may be async). */
+  let autoBusy = false
+  /** The rev at which the AI last failed: it is not asked again until the state moves on. */
+  let autoFailedAtRev = -1
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  let tickTimer: ReturnType<typeof setInterval> | null = null
 
   // ---- derived views (cached so snapshots stay referentially stable) ----
   let lobbyJson = ''
@@ -206,17 +256,22 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
   let viewOf: GameState | null = null
   let viewSeat = -2
   let view: GameState | null = null
+  let timerOf: GameState | null = null
+  let timerLimit: number | null = null
+  let timer: TurnTimer | null = null
 
   function buildLobby(): Lobby {
     return {
       roomCode,
       started,
+      turnLimitSec,
       seats: seats.map((s): LobbySeat => {
         const seat: LobbySeat = {
           kind: s.kind,
           name: s.name,
           claimed: s.kind !== 'remote' || s.token !== null,
           online: s.kind !== 'remote' || s.conn !== null,
+          standIn: s.kind === 'remote' && s.standIn,
         }
         if (s.kind === 'ai') seat.difficulty = s.difficulty ?? 'normal'
         return seat
@@ -238,6 +293,18 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
     return locals.length > 0 ? locals[0] : -1
   }
 
+  /** The clock for the current turn, or null when nothing is counting down. */
+  function currentTimer(): TurnTimer | null {
+    if (!state || state.phase === 'gameOver' || turnLimitSec === null) return null
+    if (seats[state.currentPlayer]?.kind === 'ai') return null
+    return { limitSec: turnLimitSec, seat: state.currentPlayer, deadline: turnStartedAt + turnLimitSec * 1000 }
+  }
+
+  function wireTimer(): WireTimer | null {
+    const t = currentTimer()
+    return t ? { limitSec: t.limitSec, remainingMs: Math.max(0, t.deadline - now()) } : null
+  }
+
   const store = createStore<SessionSnapshot>({
     role: 'host',
     status: 'connecting',
@@ -249,6 +316,8 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
     localSeats: Object.freeze([]),
     canAct: false,
     lastError: null,
+    timer: null,
+    forced: null,
   })
 
   /** Recomputes the snapshot. Returns true when the public lobby changed. */
@@ -267,6 +336,12 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
       viewSeat = seat
       view = state ? redactStateFor(state, seat) : null
     }
+    if (state !== timerOf || turnLimitSec !== timerLimit) {
+      timerOf = state
+      timerLimit = turnLimitSec
+      const t = currentTimer()
+      timer = t ? Object.freeze(t) : null
+    }
     const prevLocals = store.get().localSeats
     const sameLocals = prevLocals.length === locals.length && prevLocals.every((v, i) => v === locals[i])
     store.set({
@@ -277,6 +352,8 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
       mySeat: locals.length > 0 ? locals[0] : null,
       localSeats: sameLocals ? prevLocals : Object.freeze(locals),
       canAct: !closed && state !== null && state.phase !== 'gameOver' && locals.includes(state.currentPlayer),
+      timer,
+      forced,
     })
     return lobbyChanged
   }
@@ -294,6 +371,7 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
       state,
       rev,
       savedAt: Date.now(),
+      turnLimitSec,
     }
     writeJson(storage, HOST_STORAGE_KEY, data)
   }
@@ -313,7 +391,14 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
   }
 
   function sendState(conn: Connection, seat: number): void {
-    send(conn, { v: PROTOCOL_VERSION, type: 'state', state: state ? redactStateFor(state, seat) : null, rev })
+    send(conn, {
+      v: PROTOCOL_VERSION,
+      type: 'state',
+      state: state ? redactStateFor(state, seat) : null,
+      rev,
+      timer: wireTimer(),
+      forced,
+    })
   }
 
   function broadcastLobby(): void {
@@ -332,21 +417,34 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
     if (publish()) broadcastLobby()
   }
 
-  /** After any game-state change. */
+  /** After any game-state change (rev was bumped). */
   function stateChanged(): void {
+    turnStartedAt = now()
+    if (!state || state.phase === 'gameOver') {
+      // Nobody is standing in for anyone once there is nothing to play.
+      for (const s of seats) s.standIn = false
+    }
     persist()
     if (publish()) broadcastLobby()
     broadcastState()
-    scheduleAi()
+    syncTicker()
+    scheduleAuto()
   }
 
   function closeSoon(conn: Connection): void {
     setTimeout(() => conn.close(), GOODBYE_MS)
   }
 
+  /** The seat's link is gone (closed, silent, or replaced): remember since when. */
+  function dropConn(seat: SeatRec): void {
+    if (seat.conn === null) return
+    seat.conn = null
+    seat.offlineSince = now()
+  }
+
   function kick(seat: SeatRec, code: NetErrorCode, message: string): void {
     const conn = seat.conn
-    seat.conn = null
+    dropConn(seat)
     if (conn) {
       sendError(conn, code, message)
       closeSoon(conn)
@@ -374,7 +472,7 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
 
   // ---- game ----
 
-  function tryApply(action: Action): NetError | null {
+  function tryApply(action: Action, reason: ForcedReason | null = null): NetError | null {
     if (!state) return netError('not-started', 'The game has not started')
     let next: GameState
     try {
@@ -387,37 +485,109 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
     }
     state = next
     rev++
+    forced = reason
     stateChanged()
     return null
   }
 
-  function scheduleAi(): void {
-    const choose = opts.chooseAiAction
-    if (aiTimer !== null || closed || !choose || !state || state.phase === 'gameOver') return
-    const seat = seats[state.currentPlayer]
-    if (!seat || seat.kind !== 'ai') return
-    const atRev = rev
-    aiTimer = setTimeout(() => {
-      aiTimer = null
-      void playAi(choose, atRev)
-    }, aiDelayMs)
+  // ---- automatic moves: AI seats, stand-ins, the turn clock ----
+
+  function cancelAuto(): void {
+    if (autoTimer !== null) clearTimeout(autoTimer)
+    autoTimer = null
   }
 
-  async function playAi(choose: NonNullable<HostSessionOptions['chooseAiAction']>, atRev: number): Promise<void> {
-    if (closed || !state) return
-    if (rev !== atRev) return scheduleAi()
+  /** True once the current seat's time is up. */
+  function timeIsUp(): boolean {
+    return turnLimitSec !== null && now() - turnStartedAt >= turnLimitSec * 1000
+  }
+
+  /**
+   * Arms the one pending automatic move when the seat to move needs one:
+   * an AI seat (after aiDelayMs), a stand-in (same pace), or any human seat
+   * whose clock ran out (at once). Idempotent; called after every change and
+   * on every tick.
+   */
+  function scheduleAuto(): void {
+    const choose = opts.chooseAiAction
+    if (autoTimer !== null || autoBusy || closed || !choose || !state || state.phase === 'gameOver') return
+    if (rev === autoFailedAtRev) return
+    const seat = seats[state.currentPlayer]
+    if (!seat) return
+    let reason: ForcedReason | null
+    let delay: number
+    if (seat.kind === 'ai') {
+      reason = null
+      delay = aiDelayMs
+    } else if (seat.kind === 'remote' && seat.standIn) {
+      reason = 'offline'
+      delay = aiDelayMs
+    } else if (timeIsUp()) {
+      reason = 'timeout'
+      delay = 0
+    } else return
+    const atRev = rev
+    autoTimer = setTimeout(() => {
+      autoTimer = null
+      void playAuto(choose, atRev, reason)
+    }, delay)
+  }
+
+  async function playAuto(
+    choose: NonNullable<HostSessionOptions['chooseAiAction']>,
+    atRev: number,
+    reason: ForcedReason | null,
+  ): Promise<void> {
+    if (closed || !state || state.phase === 'gameOver') return
+    if (rev !== atRev) return scheduleAuto()
     const seatIndex = state.currentPlayer
+    const seat = seats[seatIndex]
+    // The guest came back in the meantime: the move is theirs again.
+    if (reason === 'offline' && !seat?.standIn) return
+    if (reason === 'timeout' && !timeIsUp()) return scheduleAuto()
+    autoBusy = true
     let action: Action
     try {
-      action = await choose(redactStateFor(state, seatIndex), seats[seatIndex]?.difficulty ?? 'normal')
+      // Forced moves for humans are played at normal strength, AI seats at theirs.
+      action = await choose(redactStateFor(state, seatIndex), seat?.kind === 'ai' ? (seat.difficulty ?? 'normal') : 'normal')
     } catch (e) {
+      autoBusy = false
+      autoFailedAtRev = rev
       store.set({ lastError: netError('ai-failed', `AI could not choose: ${errorMessage(e)}`) })
       return
     }
+    autoBusy = false
     if (closed) return
-    if (rev !== atRev) return scheduleAi()
-    const err = tryApply(action)
-    if (err) store.set({ lastError: netError('ai-failed', `AI chose an illegal action: ${err.message}`) })
+    if (rev !== atRev) return scheduleAuto()
+    const err = tryApply(action, reason)
+    if (err) {
+      autoFailedAtRev = rev
+      store.set({ lastError: netError('ai-failed', `AI chose an illegal action: ${err.message}`) })
+    }
+  }
+
+  /** Every tickMs while a game is on: flag stand-ins, fire the turn clock. */
+  function tick(): void {
+    if (closed || !state || state.phase === 'gameOver') return syncTicker()
+    const t = now()
+    let flagged = false
+    for (const s of seats) {
+      if (s.kind === 'remote' && s.conn === null && !s.standIn && t - s.offlineSince >= standInAfterMs) {
+        s.standIn = true
+        flagged = true
+      }
+    }
+    if (flagged) lobbyChanged()
+    scheduleAuto()
+  }
+
+  function syncTicker(): void {
+    const wanted = !closed && started && state !== null && state.phase !== 'gameOver' && tickMs > 0
+    if (wanted && tickTimer === null) tickTimer = setInterval(tick, tickMs)
+    else if (!wanted && tickTimer !== null) {
+      clearInterval(tickTimer)
+      tickTimer = null
+    }
   }
 
   // ---- guests ----
@@ -435,7 +605,7 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
     conn.onClose(() => {
       const i = seatOf(conn)
       if (i === -1) return
-      seats[i].conn = null
+      dropConn(seats[i])
       if (publish()) broadcastLobby()
     })
   }
@@ -446,7 +616,7 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
     if (!parsed.ok) {
       if (parsed.reason === 'version') {
         const i = seatOf(conn)
-        if (i !== -1) seats[i].conn = null
+        if (i !== -1) dropConn(seats[i])
         sendError(
           conn,
           'version-mismatch',
@@ -484,7 +654,7 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
         sendState(conn, seatIndex)
         return
       case 'leave':
-        seat.conn = null
+        dropConn(seat)
         if (!started) {
           // Mid-game the seat stays reserved: the player index must not change hands.
           seat.token = null
@@ -541,6 +711,13 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
     }
     seat.conn = conn
     seat.lastSeen = Date.now()
+    seat.offlineSince = 0
+    if (seat.standIn) {
+      // Back in control. A stand-in move still waiting its turn is dropped;
+      // one already being chosen lands (it is a legal move either way).
+      seat.standIn = false
+      if (state && state.currentPlayer === index) cancelAuto()
+    }
     persist()
     const changed = publish()
     send(conn, {
@@ -551,8 +728,11 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
       lobby,
       state: state ? redactStateFor(state, index) : null,
       rev,
+      timer: wireTimer(),
+      forced,
     })
     if (changed) for (const s of seats) if (s.conn && s.conn !== conn) send(s.conn, { v: PROTOCOL_VERSION, type: 'lobby', lobby })
+    scheduleAuto() // the clock may already have run out while they were away
   }
 
   // ---- room registration ----
@@ -584,7 +764,7 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
           persist()
           store.set({ status: 'connected' })
           if (publish()) broadcastLobby()
-          scheduleAi()
+          scheduleAuto()
           return
         } catch (e) {
           if (closed) return
@@ -623,7 +803,7 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
     for (const s of seats) {
       if (s.conn && now - s.lastSeen > heartbeatMs * 3) {
         const conn = s.conn
-        s.conn = null
+        dropConn(s)
         conn.close()
         dropped = true
       }
@@ -639,6 +819,7 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
   if (heartbeatMs > 0) heartbeatTimer = setInterval(checkHeartbeats, heartbeatMs)
 
   publish()
+  syncTicker()
   void openRoom()
 
   // ---- facade ----
@@ -699,6 +880,8 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
               lobby,
               state: null,
               rev,
+              timer: null,
+              forced: null,
             })
           }
         })
@@ -707,20 +890,26 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
       const old: SeatRec | undefined = seats[index]
       if (config.kind === 'remote') {
         if (old?.kind === 'remote') return true // already an open/claimed guest seat
-        seats[index] = { kind: 'remote', name: '', token: null, conn: null, lastSeen: 0, lastEmoteAt: 0 }
+        seats[index] = newSeat('remote', '')
       } else {
         if (old) kick(old, 'kicked', 'The host gave your seat to someone else')
-        const rec: SeatRec = {
-          kind: config.kind,
-          name: cleanName(config.name, config.kind === 'ai' ? `AI ${index + 1}` : `플레이어 ${index + 1}`),
-          token: null,
-          conn: null,
-          lastSeen: 0,
-          lastEmoteAt: 0,
-        }
+        const rec = newSeat(
+          config.kind,
+          cleanName(config.name, config.kind === 'ai' ? `AI ${index + 1}` : `플레이어 ${index + 1}`),
+        )
         if (config.kind === 'ai') rec.difficulty = config.difficulty ?? 'normal'
         seats[index] = rec
       }
+      lobbyChanged()
+      return true
+    },
+
+    setTurnLimit(seconds) {
+      if (closed) return false
+      if (started) return fail('bad-lobby', 'The turn limit cannot change during a game')
+      if (!isTurnLimit(seconds)) return fail('bad-lobby', 'The turn limit must be null or 10..600 seconds')
+      if (seconds === turnLimitSec) return true
+      turnLimitSec = seconds
       lobbyChanged()
       return true
     },
@@ -733,13 +922,11 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
       if (seats.some((s) => s.kind === 'remote' && s.token === null)) {
         return fail('bad-lobby', 'A guest seat is still empty')
       }
-      if (aiTimer !== null) {
-        clearTimeout(aiTimer)
-        aiTimer = null
-      }
+      cancelAuto()
       started = true
       state = initialState
       rev++
+      forced = null
       store.set({ lastError: null })
       stateChanged()
       return true
@@ -747,13 +934,11 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
 
     returnToLobby() {
       if (closed || !started) return
-      if (aiTimer !== null) {
-        clearTimeout(aiTimer)
-        aiTimer = null
-      }
+      cancelAuto()
       started = false
       state = null
       rev++
+      forced = null
       stateChanged()
     },
 
@@ -775,10 +960,11 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
       if (closed) return
       closed = true
       stopLifecycle()
-      if (aiTimer !== null) clearTimeout(aiTimer)
+      cancelAuto()
       if (heartbeatTimer !== null) clearInterval(heartbeatTimer)
-      aiTimer = null
       heartbeatTimer = null
+      if (tickTimer !== null) clearInterval(tickTimer)
+      tickTimer = null
       const l = listener
       listener = null
       registered = false
@@ -798,7 +984,7 @@ export function createHostSession(opts: HostSessionOptions): HostSession {
         l?.close()
       }
       sleeper.wake()
-      store.set({ status: 'disconnected', canAct: false })
+      store.set({ status: 'disconnected', canAct: false, timer: null })
     },
   }
 }

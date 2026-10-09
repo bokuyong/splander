@@ -252,6 +252,7 @@ export function LogSheet({
         <ol className="log-list">
           {[...log].reverse().map((entry) => (
             <li key={entry.id} className={entry.seat === viewer ? 'is-me' : ''}>
+              {entry.note && <small className="log-note">{entry.note}</small>}
               {entry.text}
             </li>
           ))}

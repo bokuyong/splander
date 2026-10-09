@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import type { GameState } from '../../shared/contract'
+import type { ForcedReason } from '../controller'
 import { describeAction, diffEvents } from '../logic/describe'
 import type { TurnEvents } from '../logic/describe'
 import { playFlights } from '../logic/motion'
@@ -12,6 +13,15 @@ export interface LogEntry {
   id: number
   seat: number
   text: string
+  /** Why the move was not the player's own doing (online: clock ran out, player away). */
+  note?: string
+}
+
+/** The log's remark for a move the host's AI played for `seat`'s owner. */
+export function forcedNote(reason: ForcedReason | null | undefined, name: string): string | undefined {
+  if (reason === 'timeout') return '시간 초과 · AI가 대신 뒀어요'
+  if (reason === 'offline') return `${name} 대신 AI가 뒀어요`
+  return undefined
 }
 
 export interface GameFeed {
@@ -57,7 +67,11 @@ function isNewGame(prev: GameState, next: GameState): boolean {
   return next.turn < prev.turn || (next.lastAction === null && prev.lastAction !== null)
 }
 
-export function useGameFeed(state: GameState, layer: RefObject<HTMLElement | null>): GameFeed {
+export function useGameFeed(
+  state: GameState,
+  layer: RefObject<HTMLElement | null>,
+  forced: ForcedReason | null = null,
+): GameFeed {
   const prevRef = useRef<GameState>(state)
   const idRef = useRef(1)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -87,6 +101,9 @@ export function useGameFeed(state: GameState, layer: RefObject<HTMLElement | nul
     const ev = diffEvents(prev, state)
     if (!ev) return
     const entry: LogEntry = { id: idRef.current++, seat: ev.actor, text: ev.text }
+    // `forced` always arrives together with the state it describes
+    const note = forcedNote(forced, state.players[ev.actor]?.name ?? '')
+    if (note) entry.note = note
     setFeed((f) => ({
       ...f,
       log: [...f.log, entry].slice(-LOG_LIMIT),
@@ -99,7 +116,7 @@ export function useGameFeed(state: GameState, layer: RefObject<HTMLElement | nul
       () => setFeed((f) => (f.last === ev ? { ...f, fresh: false } : f)),
       FRESH_MS,
     )
-  }, [state, layer])
+  }, [state, layer, forced])
 
   useEffect(
     () => () => {

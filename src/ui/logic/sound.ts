@@ -18,6 +18,7 @@ export type SoundName =
   | 'gameLose'
   | 'error'
   | 'emote'
+  | 'timerWarn'
 
 // --- Persisted setting ---------------------------------------------------------
 
@@ -203,6 +204,11 @@ const RECIPES: Record<SoundName, (v: Voice) => void> = {
   emote: (v) => {
     v.tone({ freq: 620, glide: 930, at: 0, dur: 0.09, gain: 0.14, attack: 0.004 })
     v.noise({ at: 0, dur: 0.04, from: 1800, to: 3200, gain: 0.04 })
+  },
+  // the turn clock is running low: a soft wooden tick, ~70 ms, quieter than a tap
+  timerWarn: (v) => {
+    v.tone({ freq: 1040, glide: 760, at: 0, dur: 0.07, type: 'triangle', gain: 0.1, attack: 0.002 })
+    v.noise({ at: 0, dur: 0.025, from: 2400, to: 1600, gain: 0.03 })
   },
 }
 

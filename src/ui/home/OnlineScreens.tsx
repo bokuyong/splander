@@ -3,8 +3,30 @@
 import { useEffect, useState } from 'react'
 import type { Difficulty } from '../../shared/contract'
 import { THEME } from '../../data'
-import { CloseIcon, GemIcon, LinkIcon, MoonIcon, PalaceIcon, PlayIcon, RobotIcon, UserIcon } from '../components/Icons'
-import { Page } from './HomeScreens'
+import {
+  ClockIcon,
+  CloseIcon,
+  GemIcon,
+  LinkIcon,
+  MoonIcon,
+  PalaceIcon,
+  PlayIcon,
+  RobotIcon,
+  UserIcon,
+} from '../components/Icons'
+import { Page, Segmented } from './HomeScreens'
+
+/** The lobby's turn-limit choices (seconds; null = no limit), as the net module offers them. */
+const TURN_LIMIT_OPTIONS: { value: number | null; label: string }[] = [
+  { value: null, label: '없음' },
+  { value: 30, label: '30초' },
+  { value: 60, label: '60초' },
+  { value: 90, label: '90초' },
+]
+
+function turnLimitText(sec: number | null): string {
+  return sec === null ? '차례 시간 제한 없음' : `차례마다 ${sec}초 · 시간이 다 되면 AI가 대신 둬요`
+}
 
 /** Mirrors ConnectionStatus of src/net. */
 export type OnlineStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
@@ -19,6 +41,8 @@ export interface LobbySeatView {
   claimed: boolean
   /** remote seats: that guest is connected right now. */
   online: boolean
+  /** remote seats: away for a while, the AI plays their turns. */
+  standIn?: boolean
   /** This device's own seat (highlighted). */
   isMe?: boolean
 }
@@ -131,6 +155,10 @@ export interface OnlineLobbyProps {
   onAddSeat?: (kind: 'remote' | 'ai') => void
   /** Host only: remove seat `index` (at least 2 remain). */
   onRemoveSeat?: (index: number) => void
+  /** Seconds per turn, null = no limit (net: lobby.turnLimitSec). */
+  turnLimitSec: number | null
+  /** Host only: change the turn limit. Guests only see it. */
+  onTurnLimit?: (seconds: number | null) => void
   /** Shown when status is 'disconnected'. */
   onRetry?: () => void
   /** Leave / close the room for good. */
@@ -148,7 +176,8 @@ function seatStatus(seat: LobbySeatView): string {
   if (seat.kind === 'ai') return `AI · ${THEME.difficulty[seat.difficulty ?? 'normal']}`
   if (seat.kind === 'local') return '이 방의 주인'
   if (!seat.claimed) return '기다리는 중…'
-  return seat.online ? '들어왔어요' : '잠깐 자리 비움'
+  if (seat.online) return '들어왔어요'
+  return seat.standIn ? '자리 비움 · AI가 대신 둬요' : '잠깐 자리 비움'
 }
 
 export function OnlineLobby({
@@ -162,6 +191,8 @@ export function OnlineLobby({
   onStart,
   onAddSeat,
   onRemoveSeat,
+  turnLimitSec,
+  onTurnLimit,
   onRetry,
   onLeave,
 }: OnlineLobbyProps) {
@@ -254,6 +285,30 @@ export function OnlineLobby({
           </button>
         </div>
       )}
+
+      <section className="panel turn-limit">
+        <h2>
+          <ClockIcon /> 차례 시간
+        </h2>
+        {host && onTurnLimit ? (
+          <>
+            {/* Segmented wants a string/number value: 0 stands for "no limit" */}
+            <Segmented
+              label="차례 시간"
+              value={turnLimitSec ?? 0}
+              options={TURN_LIMIT_OPTIONS.map((o) => ({ value: o.value ?? 0, label: o.label }))}
+              onChange={(v) => onTurnLimit(v === 0 ? null : v)}
+            />
+            <p className="field-note">
+              {turnLimitSec === null
+                ? '시간 제한 없이 느긋하게. 자리를 오래 비운 친구 대신에는 AI가 둬요.'
+                : `시간이 다 되면 AI가 그 사람 대신 한 수 둬요. 자리를 오래 비워도 게임은 계속돼요.`}
+            </p>
+          </>
+        ) : (
+          <p className="field-note">{turnLimitText(turnLimitSec)}</p>
+        )}
+      </section>
       {error && (
         <p className="reason" role="alert">
           {error}
