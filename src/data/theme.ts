@@ -23,6 +23,7 @@ export interface Theme {
   title: string
   titleEn: string
   tagline: string
+  author: string
   tokens: Record<TokenColor, TokenTheme>
   tiers: Record<Tier, TierTheme>
   labels: {
@@ -66,6 +67,7 @@ export const THEME: Theme = {
   title: '스플랜더',
   titleEn: 'Splander',
   tagline: '보석을 모아, 둘이서 쌓는 명성',
+  author: '이한솔',
   tokens: {
     white: { name: '다이아몬드', short: '다', emoji: '💎', color: '#E9EDF3', soft: '#F6F8FB', ink: '#2B2F3A' },
     blue: { name: '사파이어', short: '사', emoji: '🔷', color: '#2E62D9', soft: '#D8E2F7', ink: '#FFFFFF' },

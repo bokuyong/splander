@@ -104,6 +104,7 @@ export function HomeScreen({ saved, onResume, onSolo, onLocal, onOnline, onHowTo
         <p className="home-en">{THEME.titleEn}</p>
         <h1>{THEME.title}</h1>
         <p className="home-tagline">{THEME.tagline}</p>
+        <p className="home-by">by {THEME.author}</p>
         <div className="home-gems" aria-hidden="true">
           <GemToken color="white" />
           <GemToken color="blue" />

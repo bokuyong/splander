@@ -160,6 +160,9 @@ export function GameOverScreen({
             </button>
           </div>
         </div>
+        <p className="gameover-credit">
+          {THEME.title} · by {THEME.author}
+        </p>
       </div>
     </div>
   )
